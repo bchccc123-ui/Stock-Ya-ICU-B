@@ -9,11 +9,11 @@ import { DRUG_MASTER, DEFAULT_NURSES, STORAGE_GROUPS, SHIFTS, BEDS } from './dat
 /* ═══ STYLES ═══ */
 const css = `
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;background:#F4F7F5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:#1A2E25}
+html,body{height:100%;background:#F8F9FA;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:#1A2E25}
 #root{height:100%}
-.app{max-width:480px;margin:0 auto;height:100vh;display:flex;flex-direction:column;background:#F4F7F5;position:relative;overflow:hidden}
+.app{max-width:480px;margin:0 auto;height:100vh;display:flex;flex-direction:column;background:#F8F9FA;position:relative;overflow:hidden}
 /* topbar */
-.bar{background:linear-gradient(135deg,#0F6E56 0%,#1D9E75 100%);padding:12px 16px 14px;flex-shrink:0}
+.bar{background:#0F766E;padding:12px 16px 14px;flex-shrink:0}
 .bar-title{font-size:16px;font-weight:600;color:#fff}
 .bar-sub{font-size:11px;color:#9FE1CB;margin-top:1px}
 .bar-row{display:flex;align-items:center;justify-content:space-between}
@@ -144,6 +144,23 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns
 @keyframes dot-pulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(255,234,0,0.8)}50%{transform:scale(1.3);box-shadow:0 0 0 7px transparent}}
 .bell-anim{display:inline-block;animation:bell-rock 2.8s ease-in-out infinite;transform-origin:50% 0%;filter:drop-shadow(0 2px 5px rgba(0,0,0,0.35))}
 .pulse-dot{width:13px;height:13px;border-radius:50%;background:#FFEA00;animation:dot-pulse .9s ease-in-out infinite;flex-shrink:0}
+@keyframes shake-scale{0%,100%{transform:scale(1) rotate(0)}10%{transform:scale(1.08) rotate(-8deg)}20%{transform:scale(1.08) rotate(8deg)}30%{transform:scale(1.05) rotate(-5deg)}40%{transform:scale(1.05) rotate(5deg)}50%,90%{transform:scale(1) rotate(0)}}
+@keyframes bounce-icon{0%,100%{transform:translateY(0)}35%{transform:translateY(-7px)}55%{transform:translateY(-4px)}75%{transform:translateY(-2px)}}
+@keyframes badge-blink{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(1.15)}}
+@keyframes ripple-out{0%{transform:scale(0.8);opacity:0.5}100%{transform:scale(2);opacity:0}}
+@keyframes icon-pulse{0%,100%{box-shadow:0 0 0 0 rgba(236,64,122,0.55)}60%{box-shadow:0 0 0 10px rgba(236,64,122,0)}}
+@keyframes icon-pulse-blue{0%,100%{box-shadow:0 0 0 0 rgba(66,165,245,0.55)}60%{box-shadow:0 0 0 10px rgba(66,165,245,0)}}
+.alert-icon-pulse{animation:icon-pulse 1.6s ease-in-out infinite}
+.alert-icon-pulse-blue{animation:icon-pulse-blue 1.6s ease-in-out infinite}
+.shake-icon{display:inline-block;animation:shake-scale 0.9s ease-in-out infinite}
+.bounce-icon{display:inline-block;animation:bounce-icon 1.5s ease-in-out infinite}
+.blink-badge{animation:badge-blink 1s ease-in-out infinite}
+.sc-ripple{position:relative;overflow:hidden;transition:transform .2s ease,box-shadow .2s ease}
+.sc-ripple:hover{transform:scale(1.02);box-shadow:0 4px 14px rgba(0,0,0,0.12);cursor:pointer}
+.sc-ripple:active{transform:scale(0.98) !important;box-shadow:0 1px 4px rgba(0,0,0,0.08) !important}
+.sc-ripple::after{content:'';position:absolute;inset:0;border-radius:inherit;background:rgba(0,0,0,0.06);transform:scale(0);opacity:0;transition:transform .3s,opacity .3s}
+.sc-ripple:active::after{transform:scale(2);opacity:1;transition:none}
+
 .qbar:active{background:#085041}
 .qbar-icon{width:36px;height:36px;background:rgba(255,255,255,.2);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px}
 .qbar-text{flex:1;color:#fff}
@@ -200,6 +217,15 @@ const fmtExpiry = (expiry, drug) => {
     return `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`
   }
   return fmtMY(expiry)
+}
+
+// แปลง durationMin (นาที) → "X ชม. Y นาที" ถ้า ≥60 หรือ "X นาที"
+const fmtDuration = (min) => {
+  if (min == null) return ''
+  if (min < 60) return `${min} นาที`
+  const h = Math.floor(min / 60)
+  const m = Math.round((min % 60) * 10) / 10
+  return m > 0 ? `${h} ชม. ${m} นาที` : `${h} ชม.`
 }
 
 /* ═══ NURSE PICKER ═══ */
@@ -265,21 +291,21 @@ function DrugPicker({ drugs, selectedId, query, open, onChange, onSelect, onClea
 function MyPicker({ month, year, onMonth, onYear }) {
   const curYear = new Date().getFullYear()
   const months = ['01','02','03','04','05','06','07','08','09','10','11','12']
-  const thM = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+  const thM = ['Jan.','Feb.','Mar.','Apr.','May','Jun.','Jul.','Aug.','Sep.','Oct.','Nov.','Dec.']
   const years = Array.from({ length: 10 }, (_, i) => curYear + i)
   return (
     <div className="g2">
       <div>
         <div className="lbl">เดือน EXP</div>
         <select className="inp" value={month} onChange={e => onMonth(e.target.value)}>
-          <option value="">-- เดือน --</option>
+          <option value="">-- Month --</option>
           {months.map((m, i) => <option key={m} value={m}>{m} ({thM[i]})</option>)}
         </select>
       </div>
       <div>
-        <div className="lbl">ปี EXP</div>
+        <div className="lbl">EXP Year</div>
         <select className="inp" value={year} onChange={e => onYear(e.target.value)}>
-          <option value="">-- ปี --</option>
+          <option value="">-- Year --</option>
           {years.map(y => <option key={y} value={y}>{y}</option>)}
         </select>
       </div>
@@ -1057,7 +1083,9 @@ function QrScanModal({ onScan, onClose, drugs }) {
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.85)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
-      <div style={{ background:'#fff', borderRadius:16, padding:20, width:'min(340px,95vw)', textAlign:'center', maxHeight:'92vh', overflowY:'auto' }}>
+      <div style={{ background:'#fff', borderRadius:16, padding:20, width:'min(340px,95vw)', textAlign:'center', maxHeight:'92vh', overflowY:'auto', position:'relative' }}>
+        <button onClick={() => { stopScanner(); onClose() }}
+          style={{ position:'absolute', top:12, right:12, width:32, height:32, borderRadius:'50%', background:'#F4F7F5', border:'0.5px solid #C8DDD4', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:16, color:'#5F7A6A', flexShrink:0 }}>✕</button>
         <div style={{ fontSize:14, fontWeight:500, color:'#0F6E56', marginBottom:4 }}>สแกน QR ยา</div>
         <div style={{ fontSize:11, color:'#8BA898', marginBottom:10 }}>จ่อกล้องไปที่ QR ในกรอบ</div>
 
@@ -1312,7 +1340,7 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
   const dl = drugsWithStock()
   const curYear = new Date().getFullYear()
   const months = ['01','02','03','04','05','06','07','08','09','10','11','12']
-  const thM = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+  const thM = ['Jan.','Feb.','Mar.','Apr.','May','Jun.','Jul.','Aug.','Sep.','Oct.','Nov.','Dec.']
   const years = Array.from({length:10},(_,i)=>curYear+i)
 
   // ── Success Screen ──
@@ -1404,7 +1432,7 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
                     <div>
                       <div className="lbl" style={{ marginTop:0 }}>เดือน EXP</div>
                       <select className="inp" value={item.expM} onChange={e=>updateCart(item.id,'expM',e.target.value)}>
-                        <option value="">-- เดือน --</option>
+                        <option value="">-- Month --</option>
                         {months.map((m,i)=><option key={m} value={m}>{m} ({thM[i]})</option>)}
                       </select>
                     </div>
@@ -1412,9 +1440,9 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
                 </div>
                 {!selDrug?.fullDateExp && (
                   <div>
-                    <div className="lbl" style={{ marginTop:0 }}>ปี EXP</div>
+                    <div className="lbl" style={{ marginTop:0 }}>EXP Year</div>
                     <select className="inp" value={item.expY} onChange={e=>updateCart(item.id,'expY',e.target.value)}>
-                      <option value="">-- ปี --</option>
+                      <option value="">-- Year --</option>
                       {years.map(y=><option key={y} value={y}>{y}</option>)}
                     </select>
                   </div>
@@ -1451,10 +1479,31 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
   )
 }
 
+/* ═══ CONFIRM MODAL ═══ */
+function ConfirmModal({ open, title, message, icon, onConfirm, onCancel, confirmLabel='ยืนยัน', confirmDanger=false }) {
+  if (!open) return null
+  return (
+    <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, background:'rgba(0,0,0,0.55)', zIndex:600, display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
+      <div style={{ background:'#fff', borderRadius:16, padding:22, width:'100%', maxWidth:300, textAlign:'center' }}>
+        {icon && <div style={{ width:48, height:48, borderRadius:'50%', background: confirmDanger ? '#FCEBEB' : '#E1F5EE', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 12px', fontSize:24 }}>{icon}</div>}
+        <div style={{ fontSize:15, fontWeight:500, color:'#1A2E25', marginBottom:6 }}>{title}</div>
+        {message && <div style={{ fontSize:12, color:'#5F7A6A', marginBottom:18, lineHeight:1.5 }}>{message}</div>}
+        <div style={{ display:'flex', gap:8 }}>
+          <button onClick={onCancel} style={{ flex:1, padding:'10px', borderRadius:10, border:'0.5px solid #C8DDD4', background:'#F4F7F5', fontSize:13, cursor:'pointer', color:'#1A2E25', fontFamily:'inherit' }}>ยกเลิก</button>
+          <button onClick={onConfirm} style={{ flex:1, padding:'10px', borderRadius:10, border:'none', background: confirmDanger ? '#A32D2D' : '#0F6E56', color:'#fff', fontSize:13, cursor:'pointer', fontWeight:500, fontFamily:'inherit' }}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 /* ═══ PENDING VIEW TAB ═══ */
 function PendingView({ pendingSyncs, drugs, nurses, db, setReplaceModal }) {
   const pending = pendingSyncs.filter(p => p.status === 'pending')
-  
+  const [confirmOpen, setConfirmOpen] = React.useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = React.useState(null)
+
   const getHoursSince = (timestamp) => {
     if (!timestamp) return 0
     const now = new Date()
@@ -1469,16 +1518,36 @@ function PendingView({ pendingSyncs, drugs, nurses, db, setReplaceModal }) {
   }
 
   const deletePending = async (docId) => {
-    if (!confirm('ยืนยันการลบรายการนี้?')) return
+    setPendingDeleteId(docId)
+    setConfirmOpen(true)
+  }
+
+  const doDelete = async () => {
     try {
-      await deleteDoc(doc(db, 'pending_syncs', docId))
+      await deleteDoc(doc(db, 'pending_syncs', pendingDeleteId))
     } catch (e) {
       alert('เกิดข้อผิดพลาด: ' + e.message)
     }
+    setConfirmOpen(false)
+    setPendingDeleteId(null)
   }
 
   return (
     <div className="scroll">
+      {/* Confirm Delete Overlay */}
+      {confirmOpen && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:600, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+          <div style={{ background:'#fff', borderRadius:16, padding:24, width:'100%', maxWidth:300, textAlign:'center' }}>
+            <div style={{ width:48, height:48, borderRadius:'50%', background:'#FCEBEB', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 14px', fontSize:24 }}>🗑️</div>
+            <div style={{ fontSize:15, fontWeight:500, color:'#1A2E25', marginBottom:6 }}>ยืนยันการลบรายการ</div>
+            <div style={{ fontSize:12, color:'#5F7A6A', marginBottom:20, lineHeight:1.5 }}>รายการ Pending นี้จะถูกลบออก<br/>ไม่สามารถเรียกคืนได้</div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button className="btn full" onClick={() => { setConfirmOpen(false); setPendingDeleteId(null) }} style={{ flex:1 }}>ยกเลิก</button>
+              <button className="btn danger full" onClick={doDelete} style={{ flex:1, background:'#A32D2D', color:'#fff', border:'none' }}>ลบรายการ</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="card blue">
         <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>⏱ Pending Replacement</div>
         <div style={{ fontSize: 11, color: '#5F7A6A' }}>
@@ -1727,6 +1796,10 @@ function QuickUseModal({ open, onClose, drugsWithStock, lots, nurses, db, initDr
 
 function Dashboard({ drugsWithStock, alerts, unret, lastCheck, lots, lotsOf, calcPutaway, nurses, setCurTab, setPutaway, db, fmtMY, daysLeft, setQModal, setSmartTimestampModal, pendingSyncs }) {
   const [retStates, setRetStates] = useState({})
+  const scrollTo = (id) => {
+    const el = document.getElementById(id)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
   const dl = drugsWithStock()
   const openRet = docId => {
     const w = unret.find(x => x.docId === docId)
@@ -1798,14 +1871,15 @@ function Dashboard({ drugsWithStock, alerts, unret, lastCheck, lots, lotsOf, cal
     const rs = retStates[w.docId]; if (!rs) return
     const drug = dl.find(d => d.id == w.drugId) || { name: w.drugName, unit: '' }
     const validEntries = rs.entries.filter(e => e.fullDate || (e.expM && e.expY))
+    // บันทึกทุก lot ลง Firebase ก่อน
     for (const entry of validEntries) {
       const iso = entry.fullDate || myToISO(entry.expM, entry.expY)
       if (!iso) continue
       await addDoc(collection(db, 'lots'), { drugId: w.drugId, qty: entry.qty, expiry: iso, ts: Timestamp.now() })
     }
+    // แสดง overlay พร้อม return lots ทั้งหมดพร้อมกัน
     if (validEntries.length > 0) {
       if (drug?.singleStock) {
-        // Single-stock: แสดง overlay แบบง่าย "วางแทนของเดิม"
         const group = STORAGE_GROUPS.find(g => g.id === drug.groupId)
         const firstIso = validEntries[0].fullDate || myToISO(validEntries[0].expM, validEntries[0].expY)
         setPutaway({ drug, qty: validEntries[0].qty, expiry: firstIso, context: 'return', singleStock: true, groupName: group?.name || '', groupIcon: group?.icon || '📦' })
@@ -1871,95 +1945,34 @@ function Dashboard({ drugsWithStock, alerts, unret, lastCheck, lots, lotsOf, cal
 
       </div>
 
-            {/* Stats — row 1: In Stock | Low Stock | Out of Stock */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
-        <div className="sc" style={{ background: '#E1F5EE', borderColor: '#9FE1CB' }}>
-          <div className="sc-n" style={{ color: '#0F6E56' }}>{dl.filter(d => d.stock > 0).length}</div>
-          <div className="sc-l" style={{ color: '#3B6D11' }}>In Stock</div>
+      {/* Stats — row 1: In Stock | Low Stock | Out of Stock */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }} id="stats-row1">
+        <div className="sc sc-ripple" style={{ background: '#FFFFFF', borderColor: '#D0E8D5', border:'0.5px solid #D0E8D5', cursor:'pointer' }} onClick={()=>document.getElementById('sect-stock')?.scrollIntoView({behavior:'smooth',block:'nearest'})}>
+          <div className="sc-n" style={{ color: '#1E8449' }}>{dl.filter(d => d.stock > 0).length}</div>
+          <div className="sc-l" style={{ color: '#7F8C8D' }}>In Stock</div>
         </div>
-        <div className="sc" style={{ background: '#FAEEDA', borderColor: '#FAC775' }}>
-          <div className="sc-n" style={{ color: '#854F0B' }}>{alerts.low.length}</div>
-          <div className="sc-l" style={{ color: '#854F0B' }}>Low Stock</div>
+        <div className="sc sc-ripple" style={{ background: '#FFFFFF', borderColor: '#F0C9A0', border:'0.5px solid #F0C9A0', cursor:'pointer' }} onClick={()=>document.getElementById('sect-stock')?.scrollIntoView({behavior:'smooth',block:'nearest'})}>
+          <div className="sc-n" style={{ color: '#D35400' }}>{alerts.low.length}</div>
+          <div className="sc-l" style={{ color: '#7F8C8D' }}>Low Stock</div>
         </div>
-        <div className="sc" style={{ background: '#FCEBEB', borderColor: '#F7C1C1' }}>
-          <div className="sc-n" style={{ color: '#A32D2D' }}>{alerts.out.length}</div>
-          <div className="sc-l" style={{ color: '#A32D2D' }}>Out of Stock</div>
+        <div className="sc sc-ripple" style={{ background: '#FFFFFF', borderColor: '#F5B8B8', border:'0.5px solid #F5B8B8', cursor:'pointer' }} onClick={()=>document.getElementById('sect-stock')?.scrollIntoView({behavior:'smooth',block:'nearest'})}>
+          <div className="sc-n" style={{ color: '#C0392B' }}>{alerts.out.length}</div>
+          <div className="sc-l" style={{ color: '#7F8C8D' }}>Out of Stock</div>
         </div>
       </div>
       {/* Stats — row 2: Expiry Alert | Pending Returns */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8, marginTop: -4 }}>
-        <div className="sc" style={{ background: '#FAEEDA', borderColor: '#FAC775' }}>
-          <div className="sc-n" style={{ color: '#854F0B' }}>{alerts.exp.length + alerts.soon.length + alerts.exchangeDue.length + alerts.exchangeOver.length}</div>
-          <div className="sc-l" style={{ color: '#854F0B' }}>Expiry Alert</div>
+        <div className="sc sc-ripple" style={{ background: '#FFFFFF', borderColor: '#F8D99A', border:'0.5px solid #F8D99A', cursor:'pointer' }} onClick={()=>document.getElementById('sect-exp')?.scrollIntoView({behavior:'smooth',block:'nearest'})}>
+          <div className="sc-n" style={{ color: '#F39C12' }}>{alerts.exp.length + alerts.soon.length + alerts.exchangeDue.length + alerts.exchangeOver.length}</div>
+          <div className="sc-l" style={{ color: '#7F8C8D' }}>Expiry Alert</div>
         </div>
-        <div className="sc" style={{ background: '#E6F1FB', borderColor: '#B5D4F4' }}>
-          <div className="sc-n" style={{ color: '#185FA5' }}>{unret.length}</div>
-          <div className="sc-l" style={{ color: '#185FA5' }}>Pending Returns</div>
+        <div className="sc sc-ripple" style={{ background: '#FFFFFF', borderColor: '#A8D4F0', border:'0.5px solid #A8D4F0', cursor:'pointer' }} onClick={()=>document.getElementById('sect-ret')?.scrollIntoView({behavior:'smooth',block:'nearest'})}>
+          <div className="sc-n" style={{ color: '#2980B9' }}>{unret.length}</div>
+          <div className="sc-l" style={{ color: '#7F8C8D' }}>Pending Returns</div>
         </div>
       </div>
 
-      {/* Last check */}
-      <div className="card green">
-        <div style={{ fontSize: 11, fontWeight: 500, color: '#0F6E56', marginBottom: 5 }}>การเช็คสต็อกล่าสุด</div>
-        {lastCheck
-          ? (() => {
-              const ts = lastCheck.ts?.toDate ? lastCheck.ts.toDate() : new Date(lastCheck.ts)
-              const shiftShort = lastCheck.shift?.includes('Day') ? 'Day Shift' : lastCheck.shift?.includes('Night') ? 'Night Shift' : lastCheck.shift || ''
-              const dateStr = ts.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: '2-digit' })
-              const timeStr = ts.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
-              return (
-                <>
-                  <div style={{ fontWeight: 500, fontSize: 13 }}>{lastCheck.nurse}</div>
-                  <div style={{ fontSize: 11, color: '#3B6D11', marginTop: 2 }}>
-                    {shiftShort} · {dateStr} เวลา {timeStr}
-                    {lastCheck.durationMin != null && <span> · ใช้เวลา <b>{lastCheck.durationMin} นาที</b></span>}
-                  </div>
-                </>
-              )
-            })()
-          : <div style={{ fontSize: 12, color: '#3B6D11' }}>ยังไม่มีการเช็คสต็อก — <span style={{ textDecoration: 'underline', cursor: 'pointer' }} onClick={() => setCurTab('check')}>เริ่มเลย</span></div>
-        }
-      </div>
-
-      {/* Alert Card 1: Stock Alert */}
-      {(alerts.low.length > 0 || alerts.out.length > 0) && (
-        <div className="card amber">
-          <div className="slbl">⚠️ Stock Alert — Low Stock & Out of Stock</div>
-          {alerts.out.map(d => <div key={d.id} className="row"><div style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{d.name}</div><span className="b br">Out of Stock</span></div>)}
-          {alerts.low.map(d => <div key={d.id} className="row"><div style={{ flex: 1 }}><div style={{ fontSize: 12, fontWeight: 500 }}>{d.name}</div><div style={{ fontSize: 10, color: '#8BA898' }}>เหลือ {d.stock} {d.unit}</div></div><span className="b ba">Low</span></div>)}
-        </div>
-      )}
-
-      {/* Alert Card 2: Expiry Alert — หมดอายุ + expire soon + ถึงเวลาแลก */}
-      {(alerts.exp.length > 0 || alerts.soon.length > 0 || alerts.exchangeDue.length > 0) && (
-        <div className="card red">
-          <div className="slbl">📅 Expiry & Exchange Alert</div>
-          {alerts.exp.map(l => {
-            const d = dl.find(x => x.id == l.drugId)
-            return d ? <div key={l.docId} className="row"><div style={{ flex: 1 }}><div style={{ fontSize: 12, fontWeight: 500 }}>{d.name}</div><div style={{ fontSize: 10, color: '#8BA898' }}>EXP {fmtMY(l.expiry)}</div></div><span className="b br">หมดอายุ</span></div> : null
-          })}
-          {alerts.exchangeDue.map(l => {
-            const d = dl.find(x => x.id == l.drugId)
-            return d ? <div key={l.docId} className="row"><div style={{ flex: 1 }}><div style={{ fontSize: 12, fontWeight: 500 }}>{d.name}</div><div style={{ fontSize: 10, color: '#8BA898' }}>EXP {fmtMY(l.expiry)} · อีก {daysLeft(l.expiry)} วัน</div></div><span className="b ba">ถึงเวลาแลก</span></div> : null
-          })}
-          {alerts.soon.slice(0, 5).map(l => {
-            const d = dl.find(x => x.id == l.drugId)
-            if (!d) return null
-            return (
-              <div key={l.docId} className="row">
-                <div style={{ flex: 1 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:5, flexWrap:'wrap' }}>
-                    <div style={{ fontSize: 12, fontWeight: 500 }}>{d.name}</div>
-                    {l.loaned && <span className="b bb" style={{ fontSize:9 }}>ฝากใช้</span>}
-                  </div>
-                  <div style={{ fontSize: 10, color: '#8BA898' }}>EXP {fmtMY(l.expiry)} · แจ้งเตือนที่ {d.alertDays||30} วัน</div>
-                </div>
-                <span className="b ba">อีก {daysLeft(l.expiry)} วัน</span>
-              </div>
-            )
-          })}
-        </div>
-      )}
+      {/* ── Actionable Alert Cards (moved directly below stat cards) ── */}
 
       {/* Pending Alert — Emergency + Missing_Tracked */}
       {pendingSyncs && pendingSyncs.filter(p => p.status === 'pending').length > 0 && (() => {
@@ -1971,33 +1984,57 @@ function Dashboard({ drugsWithStock, alerts, unret, lastCheck, lots, lotsOf, cal
           return h >= 4
         })
         return (
-          <div style={{ background:'linear-gradient(135deg,#FFF3E0,#FFF8E1)', border:'1.5px solid #FFB74D', borderRadius:12, padding:'12px 14px', cursor:'pointer' }}
-            onClick={() => setCurTab('pending')}>
-            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-              <div style={{ fontSize:24 }}>🔔</div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:13, fontWeight:600, color:'#E65100' }}>
-                  มียาค้างต้องเติมคืน {allPending.length} รายการ
+          <div style={{ background:'#FCE4EC', border:'1.5px solid #EC407A', borderRadius:14, padding:'12px 14px', cursor:'pointer', position:'relative', transition:'all 0.2s ease' }}
+            onClick={() => setCurTab('pending')}
+            onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 14px rgba(236,64,122,0.25)'}
+            onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}>
+            {/* Badge with pulse */}
+            <div className="blink-badge" style={{ position:'absolute', top:-6, left:12, background:'#F44336', color:'#fff', borderRadius:20, minWidth:20, height:20, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:600, padding:'0 5px', border:'2px solid #fff' }}>
+              {allPending.length}
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+              {/* Icon wrap with pulse ring */}
+              <div className="alert-icon-pulse" style={{ width:44, height:44, borderRadius:'50%', background:'#fff', border:'2px solid #EC407A', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                <span className="shake-icon" style={{ fontSize:22 }}>🚨</span>
+              </div>
+              <div style={{ flex:1, minWidth:0, paddingRight:4 }}>
+                <div style={{ fontSize:13, fontWeight:600, color:'#AD1457', wordBreak:'break-word', overflowWrap:'break-word' }}>
+                  มียาฉุกเฉินรอเติมคืน {allPending.length} รายการ
                 </div>
-                <div style={{ fontSize:11, color:'#854F0B', marginTop:3, lineHeight:1.5 }}>
+                <div style={{ fontSize:11, color:'#C2185B', marginTop:3, lineHeight:1.5, wordBreak:'break-word', overflowWrap:'break-word' }}>
                   {emergencyCount > 0 && <span>⚡ Emergency: {emergencyCount} รายการ{'  '}</span>}
                   {missingCount > 0 && <span>🔍 Missing Tracked: {missingCount} รายการ</span>}
                 </div>
                 {hasOld && (
-                  <div style={{ fontSize:10, color:'#A32D2D', marginTop:3, fontWeight:500 }}>⚠️ มีรายการค้างเกิน 4 ชม.</div>
+                  <div style={{ fontSize:10, color:'#B71C1C', marginTop:3, fontWeight:500 }}>⚠️ มีรายการค้างเกิน 4 ชม.</div>
                 )}
-                <div style={{ fontSize:10, color:'#854F0B', marginTop:2 }}>กดเพื่อเติมยาคืนใน Pending tab</div>
+                <div style={{ fontSize:10, color:'#AD1457', marginTop:2 }}>กด Pending tab เพื่อเติมยาคืน</div>
               </div>
-              <div style={{ color:'#E65100', fontSize:18 }}>›</div>
+              <div style={{ color:'#EC407A', fontSize:18, flexShrink:0, marginTop:2 }}>›</div>
             </div>
           </div>
         )
       })()}
 
       {/* Pending Returns */}
+      <div id='sect-ret'/>
       {unret.length > 0 && (
-        <div className="card blue">
-          <div className="slbl" style={{ color: '#185FA5' }}>Pending Returns ({unret.length}) — ใส่ EXP เพื่อดูตำแหน่งวาง</div>
+        <div style={{ background:'#E3F2FD', border:'1.5px solid #42A5F5', borderRadius:14, padding:'12px 14px', position:'relative', cursor:'pointer', transition:'all 0.2s ease' }}
+          onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 14px rgba(66,165,245,0.25)'}
+          onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}>
+          {/* Badge */}
+          <div className="blink-badge" style={{ position:'absolute', top:-6, left:12, background:'#F44336', color:'#fff', borderRadius:20, minWidth:20, height:20, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:600, padding:'0 5px', border:'2px solid #fff' }}>
+            {unret.length}
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:10 }}>
+            <div className="alert-icon-pulse-blue" style={{ width:44, height:44, borderRadius:'50%', background:'#fff', border:'2px solid #42A5F5', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+              <span className="bounce-icon" style={{ fontSize:22 }}>📥</span>
+            </div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:13, fontWeight:600, color:'#0D47A1', wordBreak:'break-word', overflowWrap:'break-word' }}>Pending Returns ({unret.length})</div>
+              <div style={{ fontSize:10, color:'#1565C0', marginTop:1 }}>ใส่ EXP เพื่อดูตำแหน่งวาง</div>
+            </div>
+          </div>
           {unret.map(w => {
             const rs = retStates[w.docId]
             const exLots = lots.filter(l => l.drugId == w.drugId && l.qty > 0).sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
@@ -2072,6 +2109,71 @@ function Dashboard({ drugsWithStock, alerts, unret, lastCheck, lots, lotsOf, cal
                 {!rs?.open && (
                   <button onClick={() => openRet(w.docId)} style={{ padding: '5px 11px', borderRadius: 8, border: '0.5px solid #CECBF6', background: '#EEEDFE', color: '#3C3489', fontSize: 11, fontWeight: 500, cursor: 'pointer', flexShrink: 0 }}>Return</button>
                 )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Last check — เขียวมิ้นต์เหมือนปุ่ม Stock Count */}
+      <div style={{ background:'#E1F5EE', border:'0.5px solid #9FE1CB', borderRadius:12, padding:14 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: '#0F6E56', marginBottom: 5 }}>👥 การเช็คสต็อกล่าสุด</div>
+        {lastCheck
+          ? (() => {
+              const ts = lastCheck.ts?.toDate ? lastCheck.ts.toDate() : new Date(lastCheck.ts)
+              const shiftShort = lastCheck.shift?.includes('Day') ? 'Day Shift' : lastCheck.shift?.includes('Night') ? 'Night Shift' : lastCheck.shift || ''
+              const dateStr = ts.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: '2-digit' })
+              const timeStr = ts.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+              return (
+                <>
+                  <div style={{ fontWeight: 500, fontSize: 13, color:'#1A2E25' }}>{lastCheck.nurse}</div>
+                  <div style={{ fontSize: 11, color: '#388E3C', marginTop: 2 }}>
+                    {shiftShort} · {dateStr} เวลา {timeStr}
+                    {lastCheck.durationMin != null && <span> · เวลา <b>{fmtDuration(lastCheck.durationMin)}</b></span>}
+                  </div>
+                </>
+              )
+            })()
+          : <div style={{ fontSize: 12, color: '#388E3C' }}>ยังไม่มีการเช็คสต็อก — <span style={{ textDecoration: 'underline', cursor: 'pointer' }} onClick={() => setCurTab('check')}>เริ่มเลย</span></div>
+        }
+      </div>
+
+      {/* Alert Card 1: Stock Alert — ครีมเบจ */}
+      <div id='sect-stock'/>
+      {(alerts.low.length > 0 || alerts.out.length > 0) && (
+        <div style={{ background:'#FDF2E9', border:'0.5px solid #F0C08A', borderRadius:12, padding:14 }}>
+          <div style={{ fontSize:11, fontWeight:500, color:'#E67E22', marginBottom:8 }}>⚠️ Stock Alert — Low Stock & Out of Stock</div>
+          {alerts.out.map(d => <div key={d.id} className="row"><div style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{d.name}</div><span style={{ display:'inline-block', padding:'2px 7px', borderRadius:10, fontSize:10, fontWeight:500, background:'#FADBD8', color:'#E74C3C' }}>Out of Stock</span></div>)}
+          {alerts.low.map(d => <div key={d.id} className="row"><div style={{ flex: 1 }}><div style={{ fontSize: 12, fontWeight: 500 }}>{d.name}</div><div style={{ fontSize: 10, color: '#8BA898' }}>เหลือ {d.stock} {d.unit}</div></div><span className="b ba">Low</span></div>)}
+        </div>
+      )}
+
+      {/* Alert Card 2: Expiry Alert — ชมพูพาสเทล */}
+      {(alerts.exp.length > 0 || alerts.soon.length > 0 || alerts.exchangeDue.length > 0) && (
+        <div style={{ background:'#FCE4EC', border:'0.5px solid #F48FB1', borderRadius:12, padding:14 }}>
+          <div id='sect-exp'/>
+          <div style={{ fontSize:11, fontWeight:500, color:'#D81B60', marginBottom:8 }}>📅 Expiry & Exchange Alert</div>
+          {alerts.exp.map(l => {
+            const d = dl.find(x => x.id == l.drugId)
+            return d ? <div key={l.docId} className="row"><div style={{ flex: 1 }}><div style={{ fontSize: 12, fontWeight: 500 }}>{d.name}</div><div style={{ fontSize: 10, color: '#C2185B' }}>EXP {fmtMY(l.expiry)}</div></div><span style={{ display:'inline-block', padding:'2px 7px', borderRadius:10, fontSize:10, fontWeight:500, background:'#D81B60', color:'#fff' }}>หมดอายุ</span></div> : null
+          })}
+          {alerts.exchangeDue.map(l => {
+            const d = dl.find(x => x.id == l.drugId)
+            return d ? <div key={l.docId} className="row"><div style={{ flex: 1 }}><div style={{ fontSize: 12, fontWeight: 500 }}>{d.name}</div><div style={{ fontSize: 10, color: '#C2185B' }}>EXP {fmtMY(l.expiry)} · อีก {daysLeft(l.expiry)} วัน</div></div><span style={{ display:'inline-block', padding:'2px 7px', borderRadius:10, fontSize:10, fontWeight:500, background:'#D81B60', color:'#fff' }}>ถึงเวลาแลก</span></div> : null
+          })}
+          {alerts.soon.slice(0, 5).map(l => {
+            const d = dl.find(x => x.id == l.drugId)
+            if (!d) return null
+            return (
+              <div key={l.docId} className="row">
+                <div style={{ flex: 1 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:5, flexWrap:'wrap' }}>
+                    <div style={{ fontSize: 12, fontWeight: 500 }}>{d.name}</div>
+                    {l.loaned && <span className="b bb" style={{ fontSize:9 }}>ฝากใช้</span>}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#C2185B' }}>EXP {fmtMY(l.expiry)} · ใกล้หมดอายุ</div>
+                </div>
+                <span style={{ display:'inline-block', padding:'2px 8px', borderRadius:10, fontSize:10, fontWeight:500, background:'#D81B60', color:'#fff' }}>อีก {daysLeft(l.expiry)} วัน</span>
               </div>
             )
           })}
@@ -2313,6 +2415,7 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
 
         if (cnt < systemTotal && r) {
           if (r.missingType === 'known' && r.missingBed) {
+            // Missing_Tracked: FEFO auto-cut + pending_sync + withdrawal
             const sortedLots = [...ls].sort((a,b) => new Date(a.expiry)-new Date(b.expiry))
             let rem = systemTotal - cnt
             for (const l of sortedLots) {
@@ -2321,6 +2424,7 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
               batch.update(doc(db,'lots',l.docId), { qty: l.qty - cut })
               rem -= cut
             }
+            // pending_sync for Missing_Tracked
             const bedVal = r.missingBed === 'other' ? `อื่นๆ: ${r.missingNote||''}` : r.missingBed
             const pRef = doc(collection(db,'pending_syncs'))
             batch.set(pRef, {
@@ -2330,6 +2434,7 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
               created_at: Timestamp.now(), completed_at: null,
               completed_by: null, reconciled_withdrawal_id: null
             })
+            // withdrawal record
             const wRef = doc(collection(db,'withdrawals'))
             batch.set(wRef, {
               nurse, drugId: d.id, drugName: d.name, bed: bedVal,
@@ -2341,6 +2446,7 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
               reconciliation_time_minutes: null
             })
           } else {
+            // Missing_Unknown or no type: cut selected lots + withdrawal
             ls.forEach(l => { const cut = r.lotCuts[l.docId] || 0; if (cut > 0) batch.update(doc(db,'lots',l.docId), { qty: l.qty - cut }) })
             if (r.missingType === 'unknown') {
               const wRef = doc(collection(db,'withdrawals'))
@@ -2353,6 +2459,9 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
                 pending_sync_id: null,
                 reconciliation_time_minutes: null
               })
+            } else {
+              // No missingType selected (shouldn't happen due to isValid, but fallback)
+              ls.forEach(l => { const cut = r.lotCuts[l.docId] || 0; if (cut > 0) batch.update(doc(db,'lots',l.docId), { qty: l.qty - cut }) })
             }
           }
         } else if (cnt > systemTotal && r && r.expM && r.expY) {
@@ -2367,8 +2476,8 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
       await batch.commit()
       const endTs = Timestamp.now()
       const safeStartTs = startTs ? Timestamp.fromMillis(startTs.toMillis()) : null
-      // durationSec = activeMs สะสม + session ปัจจุบัน (เวลานับยาจริง ไม่รวมเวลาออกไป)
-      const finalActiveMs = activeMs + (sessionStart ? Date.now() - sessionStart : 0)
+      // ใช้ ref แทน state เพื่อป้องกัน stale closure — sessionStartRef มีค่าล่าสุดเสมอ
+      const finalActiveMs = activeMsRef.current + (sessionStartRef.current ? Date.now() - sessionStartRef.current : 0)
       const durationSec = finalActiveMs > 0 ? Math.round(finalActiveMs / 1000) : null
       const durationMin = durationSec !== null ? Math.round(durationSec / 60 * 10) / 10 : null
       await addDoc(collection(db,'checks'), {
@@ -2393,7 +2502,7 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
       <div style={{fontSize:18,fontWeight:600,color:'#0F6E56',marginBottom:8}}>บันทึกสำเร็จ</div>
       <div style={{fontSize:12,color:'#5F7A6A',marginBottom:20}}>
         {nurse} · {shift}
-        {doneDurationMin != null && <span> · ใช้เวลา <b style={{color:'#0F6E56'}}>{doneDurationMin} นาที</b></span>}
+        {doneDurationMin != null && <span> · ใช้เวลา <b style={{color:'#0F6E56'}}>{fmtDuration(doneDurationMin)}</b></span>}
       </div>
       <button className="btn primary" onClick={reset}>Stock Count รอบถัดไป</button>
     </div>
@@ -2404,7 +2513,7 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
     const r = resolves[rIdx]; const valid = isValid(r)
     const curYear = new Date().getFullYear()
     const months = ['01','02','03','04','05','06','07','08','09','10','11','12']
-    const thM = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+    const thM = ['Jan.','Feb.','Mar.','Apr.','May','Jun.','Jul.','Aug.','Sep.','Oct.','Nov.','Dec.']
     const years = Array.from({length:5},(_,i)=>curYear+i)
     return (
       <>
@@ -2496,14 +2605,14 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
                 <div>
                   <div className="lbl" style={{color:'#3C3489'}}>เดือน EXP</div>
                   <select className="inp" value={r.expM} onChange={e=>setExpM(rIdx,e.target.value)}>
-                    <option value="">-- เดือน --</option>
+                    <option value="">-- Month --</option>
                     {months.map((m,i)=><option key={m} value={m}>{m} ({thM[i]})</option>)}
                   </select>
                 </div>
                 <div>
-                  <div className="lbl" style={{color:'#3C3489'}}>ปี EXP</div>
+                  <div className="lbl" style={{color:'#3C3489'}}>EXP Year</div>
                   <select className="inp" value={r.expY} onChange={e=>setExpY(rIdx,e.target.value)}>
-                    <option value="">-- ปี --</option>
+                    <option value="">-- Year --</option>
                     {years.map(y=><option key={y} value={y}>{y}</option>)}
                   </select>
                 </div>
@@ -2762,7 +2871,7 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
         const allMValid = mRes.every(rx => rx.type==='cut' ? (rx.missingType && rx.missingType!=='' && mTotCut(rx)===mNeeded(rx) && (rx.missingType!=='known' || (rx.missingBed&&rx.missingBed!==''&&(rx.missingBed!=='other'||(rx.missingNote||'').trim()!=='')))) : (rx.expM!==''&&rx.expY!==''))
         const curYear = new Date().getFullYear()
         const months = ['01','02','03','04','05','06','07','08','09','10','11','12']
-        const thM = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+        const thM = ['Jan.','Feb.','Mar.','Apr.','May','Jun.','Jul.','Aug.','Sep.','Oct.','Nov.','Dec.']
         const years = Array.from({length:5},(_,i)=>curYear+i)
         const setMExpM = v => setLocDiscModal(prev => { const nr=[...prev.resolves]; nr[prev.rIdx]={...nr[prev.rIdx],expM:v}; return {...prev,resolves:nr} })
         const setMExpY = v => setLocDiscModal(prev => { const nr=[...prev.resolves]; nr[prev.rIdx]={...nr[prev.rIdx],expY:v}; return {...prev,resolves:nr} })
@@ -2907,14 +3016,14 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
                       <div>
                         <div className="lbl" style={{color:'#3C3489'}}>เดือน EXP</div>
                         <select className="inp" value={r.expM} onChange={e=>setMExpM(e.target.value)}>
-                          <option value="">-- เดือน --</option>
+                          <option value="">-- Month --</option>
                           {months.map((m,i)=><option key={m} value={m}>{m} ({thM[i]})</option>)}
                         </select>
                       </div>
                       <div>
-                        <div className="lbl" style={{color:'#3C3489'}}>ปี EXP</div>
+                        <div className="lbl" style={{color:'#3C3489'}}>EXP Year</div>
                         <select className="inp" value={r.expY} onChange={e=>setMExpY(e.target.value)}>
-                          <option value="">-- ปี --</option>
+                          <option value="">-- Year --</option>
                           {years.map(y=><option key={y} value={y}>{y}</option>)}
                         </select>
                       </div>
@@ -3046,10 +3155,12 @@ function Withdraw({ drugs, nurses, lots, lotsOf, withdrawals, calcPutaway, db, f
     const validEntries = entries.filter(e => e.fullDate || (e.expM && e.expY))
     if (!validEntries.length) return
     const drug = drugs.find(d => d.id == w.drugId) || { name: w.drugName, unit: '' }
+    // บันทึกทุก lot ลง Firebase ก่อน
     for (const entry of validEntries) {
       const iso = entry.fullDate || myToISO(entry.expM, entry.expY)
       await addDoc(collection(db, 'lots'), { drugId: w.drugId, qty: entry.qty, expiry: iso, ts: Timestamp.now() })
     }
+    // แสดง overlay พร้อม return lots ทั้งหมดพร้อมกัน
     if (validEntries.length > 0) {
       if (drug?.singleStock) {
         const group = STORAGE_GROUPS.find(g => g.id === drug.groupId)
@@ -3347,10 +3458,10 @@ function Expiry({ lots, drugs, daysLeft, fmtMY, db, removals, nurses, drugsWithS
         drugName:      selLot.drugName,
         qty:           selLot.qty,
         expiry:        selLot.expiry,
-        reason,
-        daysBeforeExp: dl,
-        wasInExchangeWindow: dl > 0 && dl <= (selLot.alertDays || 30),
-        missedExchange: reason === 'expired' && dl <= 0,
+        reason,                                          // expired | returned_to_pharmacy | damaged
+        daysBeforeExp: dl,                               // ติดลบ = หมดแล้ว
+        wasInExchangeWindow: dl > 0 && dl <= (selLot.alertDays || 30), // อยู่ใน window แล้วยังไม่แลก
+        missedExchange: reason === 'expired' && dl <= 0, // หมดอายุโดยไม่ได้แลก
         isDataCorrection: reason === 'data_correction',
         nurse, note,
         ts: Timestamp.now()
@@ -3714,7 +3825,7 @@ function History({ withdrawals, checks, lots, lotsOf, calcPutaway, fmtDT, fmtMY,
                 <div style={{ fontSize: 12, fontWeight: 500 }}>{c.nurse}</div>
                 <div style={{ fontSize: 10, color: '#8BA898' }}>
                   เวร{c.shift} · {c.ts && fmtDT(c.ts)}
-                  {c.durationMin != null && <span style={{color:'#0F6E56',marginLeft:4}}>· {c.durationMin} นาที</span>}
+                  {c.durationMin != null && <span style={{color:'#0F6E56',marginLeft:4}}>· {fmtDuration(c.durationMin)}</span>}
                 </div>
               </div>
               <span className="b bg">✓ เช็คแล้ว</span>
@@ -3874,7 +3985,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
     filtered.forEach(w => { drugUsage[w.drugName] = (drugUsage[w.drugName]||0) + w.qty })
     const topDrugs = Object.entries(drugUsage).sort((a,b)=>b[1]-a[1]).slice(0,5)
 
-    let csv = `Bangkok Hospital Chanthaburi : ICU-A\r\n`
+    let csv = `Bangkok Hospital Chanthaburi : ICU-B\r\n`
     csv += `=== ประวัติการใช้ยา/Return : ${mLabel} ===\r\n\r\n`
     csv += `=== สรุปทั่วไป ===\r\n`
     csv += `จำนวนครั้งใช้ยาทั้งหมด,${totalUses}\r\n`
@@ -4125,8 +4236,10 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
       return `"${dateStr} ${shiftStr}"`
     })
     const nurseHeaders = sorted.map(c => `"${c.nurse||''}"`)
+    const durHeaders   = sorted.map(c => c.durationMin != null ? `"${fmtDuration(c.durationMin)}"` : '""')
     let csv = `ชื่อยา,par,min,${dateHeaders.join(',')}\r\n`
     csv += `,,,${nurseHeaders.join(',')}\r\n`
+    csv += `,,,${durHeaders.join(',')}\r\n`
     drugIds.forEach(id => {
       const name = drugMap[id]
       // get par/min from latest check
@@ -4569,7 +4682,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
                                 {isDay?'☀️ Day':'🌙 Night'} {timeStr}
                               </span>
                               <span style={{ fontSize:11, color:'#5F7A6A' }}>{c.nurse}</span>
-                              {c.durationMin && <span style={{ fontSize:10, color:'#8BA898', marginLeft:'auto' }}>⏱ {c.durationMin} นาที</span>}
+                              {c.durationMin && <span style={{ fontSize:10, color:'#8BA898', marginLeft:'auto' }}>⏱ {fmtDuration(c.durationMin)}</span>}
                             </div>
                             {defDrugs.length > 0 && (
                               <div style={{ marginBottom:4 }}>
@@ -4712,7 +4825,7 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir }) {
     setEditId(null); resetForm(); setSaving(false); setTimeout(() => setOk(''), 2000)
   }
   const deleteDrug = async (docId) => {
-    if (!confirm('ลบยานี้?')) return
+    if (!window.confirm('ลบยานี้?')) return
     await deleteDoc(doc(db, 'drugs', docId))
   }
   const addNurse = async () => {
@@ -4723,7 +4836,7 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir }) {
     setNewNurse(''); setOk('เพิ่มพยาบาลสำเร็จ ✓'); setTimeout(() => setOk(''), 2000)
   }
   const deleteNurse = async (name) => {
-    if (!confirm(`ลบ ${name}?`)) return
+    if (!window.confirm(`ลบ ${name}?`)) return
     const snap = await getDocs(collection(db, 'nurses'))
     const d = snap.docs.find(x => x.data().name === name)
     if (d) await deleteDoc(doc(db, 'nurses', d.id))
