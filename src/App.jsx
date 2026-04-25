@@ -1559,7 +1559,7 @@ function PendingView({ pendingSyncs, drugs, nurses, db, setReplaceModal }) {
       ) : (
         <>
           <div className="info">
-            💡 <b>วิธีเติมยาคืน:</b> กดปุ่ม "Replace" แล้วสแกนยาที่เอามาเติม<br/>
+            💡 <b>วิธีเติมยาคืน:</b> กดปุ่ม "Replace" แล้วพิมพ์ชื่อยาและกรอก EXP ที่นำมาเติม<br/>
             ระบบจะตัดสต็อกเก่า (FEFO) และปิดรายการ Pending อัตโนมัติ
           </div>
           {pending.map(p => {
@@ -1975,22 +1975,22 @@ function Dashboard({ drugsWithStock, alerts, unret, lastCheck, lots, lotsOf, cal
       {/* ── Actionable Alert Cards (moved directly below stat cards) ── */}
 
       {/* Pending Alert — Emergency + Missing_Tracked */}
-      {pendingSyncs && pendingSyncs.filter(p => p.status === 'pending').length > 0 && (() => {
-        const allPending = pendingSyncs.filter(p => p.status === 'pending')
-        const emergencyCount = allPending.filter(p => p.source === 'emergency').length
-        const missingCount   = allPending.filter(p => p.source === 'missing_tracked').length
-        const hasOld = allPending.some(p => {
+      {/* Emergency Replacement Alert - เร่งด่วนมาก */}
+      {pendingSyncs && (() => {
+        const emergencyPending = pendingSyncs.filter(p => p.status === 'pending' && p.source === 'emergency')
+        if (emergencyPending.length === 0) return null
+        const hasOld = emergencyPending.some(p => {
           const h = (new Date() - (p.timestamp?.toDate ? p.timestamp.toDate() : new Date(p.timestamp))) / 3600000
           return h >= 4
         })
         return (
-          <div style={{ background:'#FCE4EC', border:'1.5px solid #EC407A', borderRadius:14, padding:'12px 14px', cursor:'pointer', position:'relative', transition:'all 0.2s ease' }}
+          <div style={{ background:'#FCE4EC', border:'1.5px solid #EC407A', borderRadius:14, padding:'12px 14px', cursor:'pointer', position:'relative', transition:'all 0.2s ease', marginBottom:8 }}
             onClick={() => setCurTab('pending')}
             onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 14px rgba(236,64,122,0.25)'}
             onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}>
             {/* Badge with pulse */}
             <div className="blink-badge" style={{ position:'absolute', top:-6, left:12, background:'#F44336', color:'#fff', borderRadius:20, minWidth:20, height:20, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:600, padding:'0 5px', border:'2px solid #fff' }}>
-              {allPending.length}
+              {emergencyPending.length}
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:12 }}>
               {/* Icon wrap with pulse ring */}
@@ -1999,11 +1999,10 @@ function Dashboard({ drugsWithStock, alerts, unret, lastCheck, lots, lotsOf, cal
               </div>
               <div style={{ flex:1, minWidth:0, paddingRight:4 }}>
                 <div style={{ fontSize:13, fontWeight:600, color:'#AD1457', wordBreak:'break-word', overflowWrap:'break-word' }}>
-                  มียาฉุกเฉินรอเติมคืน {allPending.length} รายการ
+                  มียาฉุกเฉินรอเติมคืน {emergencyPending.length} รายการ
                 </div>
-                <div style={{ fontSize:11, color:'#C2185B', marginTop:3, lineHeight:1.5, wordBreak:'break-word', overflowWrap:'break-word' }}>
-                  {emergencyCount > 0 && <span>⚡ Emergency: {emergencyCount} รายการ{'  '}</span>}
-                  {missingCount > 0 && <span>🔍 Missing Tracked: {missingCount} รายการ</span>}
+                <div style={{ fontSize:11, color:'#C2185B', marginTop:3, lineHeight:1.5 }}>
+                  ⚡ Emergency Use — ต้องเติมด่วน!
                 </div>
                 {hasOld && (
                   <div style={{ fontSize:10, color:'#B71C1C', marginTop:3, fontWeight:500 }}>⚠️ มีรายการค้างเกิน 4 ชม.</div>
@@ -2015,6 +2014,7 @@ function Dashboard({ drugsWithStock, alerts, unret, lastCheck, lots, lotsOf, cal
           </div>
         )
       })()}
+
 
       {/* Pending Returns */}
       <div id='sect-ret'/>
@@ -2114,6 +2114,46 @@ function Dashboard({ drugsWithStock, alerts, unret, lastCheck, lots, lotsOf, cal
           })}
         </div>
       )}
+
+      {/* Missing Tracked Alert - รอได้ ไม่เร่งด่วน */}
+      {pendingSyncs && (() => {
+        const missingPending = pendingSyncs.filter(p => p.status === 'pending' && p.source === 'missing_tracked')
+        if (missingPending.length === 0) return null
+        const hasOld = missingPending.some(p => {
+          const h = (new Date() - (p.timestamp?.toDate ? p.timestamp.toDate() : new Date(p.timestamp))) / 3600000
+          return h >= 6
+        })
+        return (
+          <div style={{ background:'#E3F2FD', border:'1.5px solid #64B5F6', borderRadius:14, padding:'12px 14px', cursor:'pointer', position:'relative', transition:'all 0.2s ease', marginBottom:8 }}
+            onClick={() => setCurTab('pending')}
+            onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 14px rgba(100,181,246,0.25)'}
+            onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}>
+            {/* Badge */}
+            <div style={{ position:'absolute', top:-6, left:12, background:'#2196F3', color:'#fff', borderRadius:20, minWidth:20, height:20, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:600, padding:'0 5px', border:'2px solid #fff' }}>
+              {missingPending.length}
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+              {/* Icon */}
+              <div style={{ width:44, height:44, borderRadius:'50%', background:'#fff', border:'2px solid #64B5F6', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                <span style={{ fontSize:22 }}>🔍</span>
+              </div>
+              <div style={{ flex:1, minWidth:0, paddingRight:4 }}>
+                <div style={{ fontSize:13, fontWeight:600, color:'#1565C0', wordBreak:'break-word', overflowWrap:'break-word' }}>
+                  มียาฉุกเฉินรอเติมคืน {missingPending.length} รายการ
+                </div>
+                <div style={{ fontSize:11, color:'#1976D2', marginTop:3, lineHeight:1.5 }}>
+                  🔍 Missing Tracked: {missingPending.length} รายการ
+                </div>
+                {hasOld && (
+                  <div style={{ fontSize:10, color:'#0D47A1', marginTop:3, fontWeight:500 }}>⚠️ มีรายการค้างเกิน 4 ชม.</div>
+                )}
+                <div style={{ fontSize:10, color:'#1565C0', marginTop:2 }}>กด Pending tab เพื่อเติมยาคืน</div>
+              </div>
+              <div style={{ color:'#64B5F6', fontSize:18, flexShrink:0, marginTop:2 }}>›</div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Last check — เขียวมิ้นต์เหมือนปุ่ม Stock Count */}
       <div style={{ background:'#E1F5EE', border:'0.5px solid #9FE1CB', borderRadius:12, padding:14 }}>
@@ -3747,6 +3787,7 @@ function Expiry({ lots, drugs, daysLeft, fmtMY, db, removals, nurses, drugsWithS
 function History({ withdrawals, checks, lots, lotsOf, calcPutaway, fmtDT, fmtMY, daysLeft, db, setPutaway, nurses, drugs }) {
   const [tab, setTab] = useState('w')
   const [retStates, setRetStates] = useState({})
+  const [historyMonth, setHistoryMonth] = useState('all')
 
   const openRet = docId => setRetStates(s => ({ ...s, [docId]: { open: true, expM: '', expY: '', preview: null } }))
   const closeRet = docId => setRetStates(s => ({ ...s, [docId]: undefined }))
@@ -3770,15 +3811,49 @@ function History({ withdrawals, checks, lots, lotsOf, calcPutaway, fmtDT, fmtMY,
     setPutaway({ drug, qty: w.qty, expiry: iso, pa, fefoExp, context: 'return' })
   }
 
+  // Generate available months from withdrawals
+  const availableMonths = [...new Set(withdrawals.map(w => {
+    const ts = w.ts?.toDate ? w.ts.toDate() : new Date(w.ts)
+    return ts.toISOString().slice(0,7)
+  }))].sort().reverse()
+
+  // Filter data by selected month
+  const filteredWithdrawals = historyMonth === 'all' ? withdrawals : withdrawals.filter(w => {
+    const ts = w.ts?.toDate ? w.ts.toDate() : new Date(w.ts)
+    return ts.toISOString().slice(0,7) === historyMonth
+  })
+
+  const filteredChecks = historyMonth === 'all' ? checks : checks.filter(c => {
+    const ts = c.ts?.toDate ? c.ts.toDate() : new Date(c.ts)
+    return ts.toISOString().slice(0,7) === historyMonth
+  })
+
   return (
     <>
+      {/* Month Filter Dropdown */}
+      <div style={{ marginBottom: 8 }}>
+        <select value={historyMonth} onChange={e => setHistoryMonth(e.target.value)}
+          style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '0.5px solid #CECBF6', background: '#fff', fontSize: 12, color: '#1A2E25' }}>
+          <option value="all">📅 ทุกเดือน ({withdrawals.length} รายการ)</option>
+          {availableMonths.map(month => {
+            const count = withdrawals.filter(w => {
+              const ts = w.ts?.toDate ? w.ts.toDate() : new Date(w.ts)
+              return ts.toISOString().slice(0,7) === month
+            }).length
+            const [y, m] = month.split('-')
+            const label = new Date(y, m-1).toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })
+            return <option key={month} value={month}>{label} ({count} รายการ)</option>
+          })}
+        </select>
+      </div>
+
       <div style={{ display: 'flex', gap: 8 }}>
-        <button className={`btn full${tab === 'w' ? ' primary' : ''}`} onClick={() => setTab('w')}>เบิกยา ({withdrawals.length})</button>
-        <button className={`btn full${tab === 'c' ? ' primary' : ''}`} onClick={() => setTab('c')}>เช็คสต็อก ({checks.length})</button>
+        <button className={`btn full${tab === 'w' ? ' primary' : ''}`} onClick={() => setTab('w')}>เบิกยา ({filteredWithdrawals.length})</button>
+        <button className={`btn full${tab === 'c' ? ' primary' : ''}`} onClick={() => setTab('c')}>เช็คสต็อก ({filteredChecks.length})</button>
       </div>
       <div className="card" style={{ padding: '0 14px' }}>
         {tab === 'w' ? (
-          withdrawals.length ? withdrawals.map(w => {
+          filteredWithdrawals.length ? filteredWithdrawals.map(w => {
             const rs = retStates[w.docId]
             const exLots = lots.filter(l => l.drugId == w.drugId && l.qty > 0).sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
             return (
@@ -3787,6 +3862,16 @@ function History({ withdrawals, checks, lots, lotsOf, calcPutaway, fmtDT, fmtMY,
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 12, fontWeight: 500 }}>{w.drugName}</span>
                     <span className="b bb">×{w.qty}</span>
+                    {/* Usage Type Badges */}
+                    {!w.usage_type || w.usage_type === 'Normal' ? (
+                      <span className="b" style={{background:'#E3F2FD', color:'#1976D2', border:'0.5px solid #90CAF9', fontSize:10, padding:'2px 7px'}}>💊 Stock Use</span>
+                    ) : w.usage_type === 'Emergency' ? (
+                      <span className="b" style={{background:'#FFEBEE', color:'#C62828', border:'0.5px solid #EF5350', fontSize:10, padding:'2px 7px'}}>🔔 Emergency Use</span>
+                    ) : w.usage_type === 'Missing_Tracked' ? (
+                      <span className="b" style={{background:'#FFF3E0', color:'#E65100', border:'0.5px solid #FFB74D', fontSize:10, padding:'2px 7px'}}>🔍 Missing-Track</span>
+                    ) : w.usage_type === 'Missing_Unknown' ? (
+                      <span className="b" style={{background:'#FCE4EC', color:'#AD1457', border:'0.5px solid #F06292', fontSize:10, padding:'2px 7px'}}>❓ Missing-Unk</span>
+                    ) : null}
                     {w.returned && <span className="b bg">Return แล้ว{w.retExp ? ` · EXP ${fmtMY(w.retExp)}` : ''}</span>}
                   </div>
                   <div style={{ fontSize: 10, color: '#8BA898' }}>{w.bed} · {w.nurse}{w.note && w.note !== '(Quick)' ? ' · ' + w.note : w.note === '(Quick)' ? ' · ⚡ Quick' : ''}</div>
@@ -3819,7 +3904,7 @@ function History({ withdrawals, checks, lots, lotsOf, calcPutaway, fmtDT, fmtMY,
             )
           }) : <div style={{ padding: 24, textAlign: 'center', fontSize: 12, color: '#8BA898' }}>ยังไม่มีบันทึก</div>
         ) : (
-          checks.length ? checks.map(c => (
+          filteredChecks.length ? filteredChecks.map(c => (
             <div key={c.docId} className="wrow">
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 12, fontWeight: 500 }}>{c.nurse}</div>
@@ -4005,10 +4090,10 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
     csv += `\r\n=== สรุปตามประเภทการใช้ยา (Usage Type) ===\r\n`
     csv += `ประเภท,จำนวนครั้ง,จำนวนหน่วย,%\r\n`
     const typeRows = [
-      ['Quick Use (Normal)', normal.length, normal.reduce((s,w)=>s+w.qty,0)],
-      ['Smart Timestamp → Replace (Emergency)', emergency.length, emergency.reduce((s,w)=>s+w.qty,0)],
-      ['ยาหาย — ทวนสอบได้ (Missing_Tracked)', missTrack.length, missTrack.reduce((s,w)=>s+w.qty,0)],
-      ['ยาหาย — ทวนสอบไม่ได้ (Missing_Unknown)', missUnk.length, missUnk.reduce((s,w)=>s+w.qty,0)],
+      ['Stock Use', normal.length, normal.reduce((s,w)=>s+w.qty,0)],
+      ['Emergency Use', emergency.length, emergency.reduce((s,w)=>s+w.qty,0)],
+      ['Missing — ทวนสอบได้', missTrack.length, missTrack.reduce((s,w)=>s+w.qty,0)],
+      ['Missing — ทวนสอบไม่ได้', missUnk.length, missUnk.reduce((s,w)=>s+w.qty,0)],
     ]
     typeRows.forEach(([label, cnt, qty]) => {
       const pct = totalUses > 0 ? (cnt/totalUses*100).toFixed(1) : 0
@@ -4018,9 +4103,9 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
     // ── Section 3: Smart Timestamp Statistics (ใหม่!) ──
     const smartNormal = normal.length
     const smartEmg    = emergency.length
-    csv += `\r\n=== สถิติ Smart Timestamp vs Quick Use ===\r\n`
-    csv += `Quick Use (กดปกติ),${smartNormal} ครั้ง\r\n`
-    csv += `Smart Timestamp (ฉุกเฉิน),${smartEmg} ครั้ง\r\n`
+    csv += `\r\n=== สถิติ Emergency Use vs Stock Use ===\r\n`
+    csv += `Stock Use,${smartNormal} ครั้ง\r\n`
+    csv += `Emergency Use,${smartEmg} ครั้ง\r\n`
     csv += `สัดส่วน Emergency,${totalUses > 0 ? (smartEmg/totalUses*100).toFixed(1) : 0}%\r\n`
     if (emergency.length > 0) {
       const recon_times = emergency.filter(w => w.reconciliation_time_minutes != null)
