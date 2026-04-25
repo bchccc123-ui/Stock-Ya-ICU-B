@@ -948,12 +948,10 @@ export default function App() {
           {curTab === 'pending' && (
             <PendingView
               pendingSyncs={pendingSyncs}
-              withdrawals={withdrawals}
               drugs={drugs}
               nurses={nurses}
               db={db}
               setReplaceModal={(p) => { setReplacePending(p); setReplaceModal(true) }}
-              fmtDTsafe={fmtDTsafe}
             />
           )}
           {curTab === 'setting' && (
@@ -994,21 +992,6 @@ export default function App() {
           lots={lots}
           nurses={nurses}
           db={db}
-          getDrugDir={getDrugDir}
-          withdrawals={withdrawals}
-        />
-      )}
-      {missingReturnModal && (
-        <ReplaceModal
-          open={missingReturnModal}
-          onClose={() => { setMissingReturnModal(false); setMissingReturnPending(null) }}
-          pending={missingReturnPending}
-          drugsWithStock={drugsWithStock}
-          lots={lots}
-          nurses={nurses}
-          db={db}
-          getDrugDir={getDrugDir}
-          withdrawals={withdrawals}
         />
       )}
     </>
@@ -1253,30 +1236,12 @@ function SmartTimestampModal({ open, onClose, db }) {
 
 
 /* ═══ REPLACE MODAL (Multi-Drug + Partial + Success Overlay) ═══ */
-function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db, getDrugDir, withdrawals }) {
+function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db }) {
   const [nurse, setNurse] = useState('')
   const [nurseQuery, setNurseQuery] = useState('')
   const [nurseOpen, setNurseOpen] = useState(false)
-  
-  // สำหรับ Missing: หายา drugId จากชื่อ
-  const isMissing = pending?.source === 'missing_tracked'
-  const getMissingDrugId = () => {
-    if (!isMissing || !pending?.drug_name) return null
-    const dl = drugsWithStock()
-    const found = dl.find(d => d.name === pending.drug_name)
-    return found?.id || null
-  }
-  
   // Multi-drug cart
-  const initialCart = () => {
-    if (isMissing) {
-      const drugId = getMissingDrugId()
-      return [{ id: 1, drugId, drugQuery: '', drugOpen: false, qty: 1, expM: '', expY: '', fullDate: '', fefoPreview: null }]
-    }
-    return [{ id: 1, drugId: null, drugQuery: '', drugOpen: false, qty: 1, expM: '', expY: '', fullDate: '', fefoPreview: null }]
-  }
-  
-  const [cart, setCart] = useState(initialCart())
+  const [cart, setCart] = useState([{ id: 1, drugId: null, drugQuery: '', drugOpen: false, qty: 1, expM: '', expY: '', fullDate: '' }])
   const [saving, setSaving] = useState(false)
   const [done, setDone] = useState(false)
   const [doneItems, setDoneItems] = useState([])
@@ -1291,153 +1256,14 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
   useEffect(() => {
     if (!open) {
       setNurse(''); setNurseQuery(''); setNurseOpen(false)
-      setCart(initialCart())
+      setCart([{ id: 1, drugId: null, drugQuery: '', drugOpen: false, qty: 1, expM: '', expY: '', fullDate: '' }])
       setSaving(false); setDone(false); setDoneItems([]); setCloseJob(true)
-    } else {
-      // Reset cart when modal opens
-      setCart(initialCart())
     }
   }, [open])
 
-  const addCartItem = () => {
-    if (isMissing) {
-      // Missing: เพิ่ม lot ของยาเดียวกัน
-      const drugId = getMissingDrugId()
-      setCart(prev => [...prev, { id: Date.now(), drugId, drugQuery: '', drugOpen: false, qty: 1, expM: '', expY: '', fullDate: '', fefoPreview: null }])
-    } else {
-      // Emergency: เพิ่มยาใหม่
-      setCart(prev => [...prev, { id: Date.now(), drugId: null, drugQuery: '', drugOpen: false, qty: 1, expM: '', expY: '', fullDate: '', fefoPreview: null }])
-    }
-  }
+  const addCartItem = () => setCart(prev => [...prev, { id: Date.now(), drugId: null, drugQuery: '', drugOpen: false, qty: 1, expM: '', expY: '', fullDate: '' }])
   const removeCartItem = (id) => setCart(prev => prev.filter(c => c.id !== id))
-  
-  // Calculate FEFO Preview - ใช้ระบบเดียวกับ Restock + แสดงอันดับ
-  const calculateFEFO = (drugId, expiry, qtyToReplace = 0, isMissing = false) => {
-    if (!drugId || !expiry) return null
-    
-    let existingLots = lots
-      .filter(l => l.drugId == drugId && l.qty > 0)
-      .sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
-    
-    // ถ้าไม่ใช่ Missing → ต้องหัก qty ที่จะถูกตัดออก (FEFO) ก่อน
-    if (!isMissing && qtyToReplace > 0) {
-      existingLots = existingLots.map(l => ({ ...l })) // clone
-      let remaining = qtyToReplace
-      for (let i = 0; i < existingLots.length && remaining > 0; i++) {
-        const take = Math.min(existingLots[i].qty, remaining)
-        existingLots[i].qty -= take
-        remaining -= take
-      }
-      // กรอง lot ที่เหลือ 0 ออก
-      existingLots = existingLots.filter(l => l.qty > 0)
-    }
-    
-    // ดู direction configuration ของยา
-    const dir = getDrugDir(drugId)
-    
-    if (existingLots.length === 0) {
-      // Single stock - lot แรก
-      return { 
-        label: `🟣 วางตำแหน่งที่ 1 (lot แรก)`, 
-        color: '#9C27B0', 
-        desc: 'lot แรก'
-      }
-    }
-    
-    // รวม existing + ยาใหม่ แล้ว sort
-    const allLots = [
-      ...existingLots.map(l => ({ expiry: l.expiry, isNew: false })),
-      { expiry, isNew: true }
-    ].sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
-    
-    const total = allLots.length
-    const newIndex = allLots.findIndex(l => l.isNew)
-    
-    // คำนวณอันดับตาม direction
-    let position, label, color, positionText
-    
-    if (dir === 'rtl') {
-      // RTL: ขวา = EXP ก่อน (index 0), ซ้าย = EXP หลัง
-      position = newIndex + 1  // ตำแหน่งที่ 1 = ขวาสุด
-      if (position === 1) {
-        positionText = 'ขวาสุด'
-      } else if (position === total) {
-        positionText = 'ซ้ายสุด'
-      } else {
-        positionText = `ที่ ${position} นับจากขวา`
-      }
-    } else if (dir === 'fb') {
-      // FB: นับจากหน้า
-      position = newIndex + 1
-      if (position === 1) {
-        positionText = 'หน้าสุด'
-      } else if (position === total) {
-        positionText = 'หลังสุด'
-      } else {
-        positionText = `ที่ ${position} นับจากหน้า`
-      }
-    } else {
-      // LTR: นับจากซ้าย
-      position = newIndex + 1
-      if (position === 1) {
-        positionText = 'ซ้ายสุด'
-      } else if (position === total) {
-        positionText = 'ขวาสุด'
-      } else {
-        positionText = `ที่ ${position} นับจากซ้าย`
-      }
-    }
-    
-    const newDate = new Date(expiry)
-    const fefoDate = new Date(existingLots[0].expiry)
-    const isBeforeFefo = newDate <= fefoDate
-    
-    if (isBeforeFefo) {
-      // EXP ใหม่กว่าหรือเท่ากับ FEFO → วางด้านที่ออกก่อน
-      color = '#4CAF50'
-      label = `🟢 วาง${positionText}`
-    } else {
-      // EXP เก่ากว่า FEFO → วางด้านที่ออกหลัง
-      color = '#F44336'
-      label = `🔴 วาง${positionText}`
-    }
-    
-    return { 
-      label, 
-      color, 
-      desc: `จาก ${total} ตำแหน่ง`
-    }
-  }
-  
-  const updateCart = (id, field, val) => {
-    setCart(prev => prev.map(c => {
-      if (c.id !== id) return c
-      
-      const updated = { ...c, [field]: val }
-      
-      // คำนวณ FEFO preview หลังกรอก EXP
-      if ((field === 'expM' || field === 'expY' || field === 'fullDate') && updated.drugId) {
-        const isMissing = pending?.source === 'missing_tracked'
-        const drug = drugsWithStock().find(d => d.id == updated.drugId)
-        if (drug?.fullDateExp && updated.fullDate) {
-          updated.fefoPreview = calculateFEFO(updated.drugId, updated.fullDate, updated.qty || 0, isMissing)
-        } else if (!drug?.fullDateExp && updated.expM && updated.expY) {
-          const lastDay = new Date(+updated.expY, +updated.expM, 0).getDate()
-          const expiry = `${updated.expY}-${String(updated.expM).padStart(2,'0')}-${lastDay}`
-          updated.fefoPreview = calculateFEFO(updated.drugId, expiry, updated.qty || 0, isMissing)
-        } else {
-          updated.fefoPreview = null
-        }
-      }
-      
-      // Clear preview ถ้าเปลี่ยนยา
-      if (field === 'drugId') {
-        updated.fefoPreview = null
-      }
-      
-      return updated
-    }))
-  }
+  const updateCart = (id, field, val) => setCart(prev => prev.map(c => c.id === id ? { ...c, [field]: val } : c))
 
   const submit = async () => {
     if (!nurse || saving) return
@@ -1461,17 +1287,15 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
             ? `${item.expY}-${String(item.expM).padStart(2,'0')}-${new Date(+item.expY,+item.expM,0).getDate()}`
             : '2099-12-31')
 
-        // 1. Deduct old stock FEFO (ถ้าเป็น Emergency เท่านั้น - Missing ตัดไปแล้วตอน Stock Count)
-        if (pending.source !== 'missing_tracked') {
-          const drugLots = lots.filter(l => l.drugId == item.drugId && l.qty > 0)
-            .sort((a,b) => new Date(a.expiry) - new Date(b.expiry))
-          let rem = item.qty
-          for (const lot of drugLots) {
-            if (rem <= 0) break
-            const take = Math.min(lot.qty, rem)
-            await updateDoc(doc(db, 'lots', lot.docId), { qty: lot.qty - take })
-            rem -= take
-          }
+        // 1. Deduct old stock FEFO
+        const drugLots = lots.filter(l => l.drugId == item.drugId && l.qty > 0)
+          .sort((a,b) => new Date(a.expiry) - new Date(b.expiry))
+        let rem = item.qty
+        for (const lot of drugLots) {
+          if (rem <= 0) break
+          const take = Math.min(lot.qty, rem)
+          await updateDoc(doc(db, 'lots', lot.docId), { qty: lot.qty - take })
+          rem -= take
         }
 
         // 2. Add new lot
@@ -1480,51 +1304,16 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
           addedAt: Timestamp.now(), source: 'replace', loaned: false
         })
 
-        // 3. Withdrawal record
-        if (pending.source === 'missing_tracked') {
-          // Missing: UPDATE withdrawal เดิม (ที่สร้างตอน Stock Count) แทนการสร้างใหม่
-          // หา withdrawal ที่ link กับ pending นี้และยังไม่ได้ return
-          const existingW = withdrawals?.find(w => 
-            w.pending_sync_id === pending.docId && 
-            !w.returned
-          )
-          
-          if (existingW) {
-            // Update withdrawal เดิม
-            await updateDoc(doc(db, 'withdrawals', existingW.docId), {
-              returned: true,
-              retExp: newExpiry,
-              return_timestamp: Timestamp.now()
-            })
-          } else {
-            // Fallback: ถ้าหาไม่เจอ (กรณี withdrawal ถูกลบหรือ bug)
-            console.warn('[Missing Return] ไม่เจอ withdrawal เดิม - สร้างใหม่แทน', { 
-              pending_sync_id: pending.docId 
-            })
-            await addDoc(collection(db, 'withdrawals'), {
-              nurse, drugId: drug.id, drugName: drug.name,
-              bed: pending.bed_id, qty: item.qty,
-              note: `(Replace: Missing)`,
-              returned: true, retExp: newExpiry, ts: Timestamp.now(),
-              return_timestamp: Timestamp.now(),
-              usage_type: 'Missing_Tracked',
-              pending_sync_id: pending.docId,
-              reconciliation_time_minutes: recon_mins
-            })
-          }
-        } else {
-          // Emergency: สร้าง withdrawal ใหม่ (แบบเดิม)
-          await addDoc(collection(db, 'withdrawals'), {
-            nurse, drugId: drug.id, drugName: drug.name,
-            bed: pending.bed_id, qty: item.qty,
-            note: `(Replace: Emergency)`,
-            returned: true, retExp: newExpiry, ts: Timestamp.now(),
-            return_timestamp: Timestamp.now(),
-            usage_type: 'Emergency',
-            pending_sync_id: pending.docId,
-            reconciliation_time_minutes: recon_mins
-          })
-        }
+        // 3. Withdrawal record — returned: true (already replaced, no need to return again)
+        await addDoc(collection(db, 'withdrawals'), {
+          nurse, drugId: drug.id, drugName: drug.name,
+          bed: pending.bed_id, qty: item.qty,
+          note: `(Replace: ${pending.source === 'emergency' ? 'Emergency' : 'Missing'})`,
+          returned: true, retExp: newExpiry, ts: Timestamp.now(),
+          usage_type: pending.source === 'emergency' ? 'Emergency' : 'Missing_Tracked',
+          pending_sync_id: pending.docId,
+          reconciliation_time_minutes: recon_mins
+        })
 
         done_info.push({ name: drug.name, qty: item.qty, unit: drug.unit, expiry: newExpiry })
       }
@@ -1605,42 +1394,25 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
           {/* Multi-drug cart */}
           <div style={{ marginTop:14, marginBottom:4, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
             <div style={{ fontSize:12, fontWeight:500, color:'#1A2E25' }}>ยาที่นำมาเติมคืน</div>
-            {isMissing ? (
-              <button onClick={addCartItem} className="btn sm" style={{ fontSize:11, padding:'4px 10px', color:'#0F6E56', borderColor:'#9FE1CB' }}>+ เพิ่ม lot (ถ้า EXP ต่าง)</button>
-            ) : (
-              <button onClick={addCartItem} className="btn sm" style={{ fontSize:11, padding:'4px 10px', color:'#0F6E56', borderColor:'#9FE1CB' }}>+ เพิ่มยา</button>
-            )}
+            <button onClick={addCartItem} className="btn sm" style={{ fontSize:11, padding:'4px 10px', color:'#0F6E56', borderColor:'#9FE1CB' }}>+ เพิ่มยา</button>
           </div>
-
-          {/* Missing: แสดงชื่อยา 1 ครั้ง */}
-          {isMissing && (
-            <div style={{ marginBottom:8, padding:'10px 12px', background:'#FFF', border:'0.5px solid #D8EAE0', borderRadius:8 }}>
-              <div style={{ fontSize:13, fontWeight:500, color:'#1A2E25' }}>{pending.drug_name || '(ยาไม่ระบุ)'}</div>
-            </div>
-          )}
 
           {cart.map((item, idx) => {
             const selDrug = dl.find(d => d.id == item.drugId)
             return (
               <div key={item.id} style={{ border:'0.5px solid #D8EAE0', borderRadius:10, padding:'10px 12px', marginBottom:8, background:'#F9FCF9' }}>
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
-                  <div style={{ fontSize:11, fontWeight:500, color:'#5F7A6A' }}>
-                    {isMissing ? `Lot ${idx+1}` : `ยารายการที่ ${idx+1}`}
-                  </div>
-                  {((isMissing && cart.length > 1) || (!isMissing && cart.length > 1)) && (
-                    <button onClick={() => removeCartItem(item.id)} style={{ background:'none', border:'none', cursor:'pointer', color:'#A32D2D', fontSize:16 }}>✕</button>
-                  )}
+                  <div style={{ fontSize:11, fontWeight:500, color:'#5F7A6A' }}>ยารายการที่ {idx+1}</div>
+                  {cart.length > 1 && <button onClick={() => removeCartItem(item.id)} style={{ background:'none', border:'none', cursor:'pointer', color:'#A32D2D', fontSize:16 }}>✕</button>}
                 </div>
 
-                {/* Drug picker สำหรับ Emergency */}
-                {!isMissing && (
-                  <div style={{ marginBottom:8 }}>
-                    <DrugPicker drugs={dl} selectedId={item.drugId} query={item.drugQuery} open={item.drugOpen}
-                      onChange={(v,o)=>{ updateCart(item.id,'drugQuery',v); updateCart(item.id,'drugId',null); updateCart(item.id,'drugOpen',o!==undefined?o:v.length>0) }}
-                      onSelect={id=>{ updateCart(item.id,'drugId',id); updateCart(item.id,'drugQuery',''); updateCart(item.id,'drugOpen',false) }}
-                      onClear={()=>{ updateCart(item.id,'drugId',null); updateCart(item.id,'drugQuery','') }} />
-                  </div>
-                )}
+                {/* Drug picker inline */}
+                <div style={{ marginBottom:8 }}>
+                  <DrugPicker drugs={dl} selectedId={item.drugId} query={item.drugQuery} open={item.drugOpen}
+                    onChange={(v,o)=>{ updateCart(item.id,'drugQuery',v); updateCart(item.id,'drugId',null); updateCart(item.id,'drugOpen',o!==undefined?o:v.length>0) }}
+                    onSelect={id=>{ updateCart(item.id,'drugId',id); updateCart(item.id,'drugQuery',''); updateCart(item.id,'drugOpen',false) }}
+                    onClear={()=>{ updateCart(item.id,'drugId',null); updateCart(item.id,'drugQuery','') }} />
+                </div>
 
                 {/* Qty */}
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
@@ -1675,35 +1447,6 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
                     </select>
                   </div>
                 )}
-                
-                {/* FEFO Preview */}
-                {item.fefoPreview && (
-                  <div style={{ 
-                    marginTop: 8, 
-                    padding: '8px 12px', 
-                    background: item.fefoPreview.color + '15',
-                    border: `0.5px solid ${item.fefoPreview.color}80`,
-                    borderRadius: 8,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8
-                  }}>
-                    <div style={{ 
-                      fontSize: 11, 
-                      fontWeight: 600, 
-                      color: item.fefoPreview.color 
-                    }}>
-                      {item.fefoPreview.label}
-                    </div>
-                    <div style={{ 
-                      fontSize: 10, 
-                      color: '#5F7A6A',
-                      flex: 1
-                    }}>
-                      {item.fefoPreview.desc}
-                    </div>
-                  </div>
-                )}
               </div>
             )
           })}
@@ -1728,10 +1471,7 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
         <div style={{ padding:'10px 14px', borderTop:'0.5px solid #E0EAE5' }}>
           <button className="btn primary full" onClick={submit}
             disabled={!nurse || cart.filter(c=>c.drugId).length===0 || saving}>
-            {saving ? 'กำลังบันทึก...' : isMissing 
-              ? `✓ Replace ${cart.filter(c=>c.drugId).length} lots (${cart.reduce((s,c)=>s+c.qty,0)} ชิ้น)${!closeJob?' (ค้างต่อ)':''}`
-              : `✓ Replace ${cart.filter(c=>c.drugId).length} รายการ${!closeJob?' (ค้างต่อ)':''}`
-            }
+            {saving ? 'กำลังบันทึก...' : `✓ Replace ${cart.filter(c=>c.drugId).length} รายการ${!closeJob?' (ค้างต่อ)':''}`}
           </button>
         </div>
       </div>
@@ -1759,30 +1499,10 @@ function ConfirmModal({ open, title, message, icon, onConfirm, onCancel, confirm
 
 
 /* ═══ PENDING VIEW TAB ═══ */
-function PendingView({ pendingSyncs, withdrawals, drugs, nurses, db, setReplaceModal, fmtDTsafe }) {
+function PendingView({ pendingSyncs, drugs, nurses, db, setReplaceModal }) {
   const pending = pendingSyncs.filter(p => p.status === 'pending')
-  
-  // รวม Stock Returns (withdrawals ที่ยังไม่ได้คืน และไม่มี pending_sync_id)
-  const stockReturns = withdrawals.filter(w => 
-    !w.returned && 
-    !w.pending_sync_id && 
-    w.usage_type !== 'Missing_Tracked' && 
-    w.usage_type !== 'Emergency'
-  )
-  
-  // รวมทุกอย่างเป็น unified list
-  const allPending = [
-    ...pending.map(p => ({ ...p, type: 'replacement', timestamp: p.timestamp })),
-    ...stockReturns.map(w => ({ ...w, type: 'return', timestamp: w.ts }))
-  ].sort((a, b) => {
-    const aTime = a.timestamp?.toDate ? a.timestamp.toDate() : new Date(a.timestamp)
-    const bTime = b.timestamp?.toDate ? b.timestamp.toDate() : new Date(b.timestamp)
-    return bTime - aTime // เรียงจากใหม่ไปเก่า
-  })
-  
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   const [pendingDeleteId, setPendingDeleteId] = React.useState(null)
-  const [retStates, setRetStates] = React.useState({})
 
   const getHoursSince = (timestamp) => {
     if (!timestamp) return 0
@@ -1811,9 +1531,6 @@ function PendingView({ pendingSyncs, withdrawals, drugs, nurses, db, setReplaceM
     setConfirmOpen(false)
     setPendingDeleteId(null)
   }
-  
-  const openRet = (docId) => setRetStates(prev => ({ ...prev, [docId]: { open: true, entries: [{ qty: 1, expM: '', expY: '', fullDate: '' }] } }))
-  const closeRet = (docId) => setRetStates(prev => { const n = { ...prev }; delete n[docId]; return n })
 
   return (
     <div className="scroll">
@@ -1832,73 +1549,43 @@ function PendingView({ pendingSyncs, withdrawals, drugs, nurses, db, setReplaceM
         </div>
       )}
       <div className="card blue">
-        <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>⏱ Pending - ยารอคืนเข้าสต็อก</div>
+        <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>⏱ Pending Replacement</div>
         <div style={{ fontSize: 11, color: '#5F7A6A' }}>
-          รายการที่ต้องทำให้เสร็จภายในเวร ({allPending.length} รายการ)
+          รายการที่รอเติมยาคืน ({pending.length} รายการ)
         </div>
       </div>
-      {allPending.length === 0 ? (
+      {pending.length === 0 ? (
         <div className="ok">✓ ไม่มีรายการค้าง — ทุกอย่างเรียบร้อย</div>
       ) : (
         <>
           <div className="info">
-            💡 <b>วิธีคืนยา:</b> กดปุ่ม "Replace" หรือ "Return" แล้วพิมพ์ชื่อยาและกรอก EXP ที่นำมาคืน
+            💡 <b>วิธีเติมยาคืน:</b> กดปุ่ม "Replace" แล้วพิมพ์ชื่อยาและกรอก EXP ที่นำมาเติม<br/>
+            ระบบจะตัดสต็อกเก่า (FEFO) และปิดรายการ Pending อัตโนมัติ
           </div>
-          {allPending.map(item => {
-            const hours = getHoursSince(item.timestamp)
+          {pending.map(p => {
+            const hours = getHoursSince(p.timestamp)
             const agingClass = getAgingClass(hours)
-            
-            if (item.type === 'replacement') {
-              // Pending Replacement (Emergency / Missing)
-              const drugName = item.drug_name || '(ยาไม่ระบุ)'
-              return (
-                <div key={item.docId} className={`pending-card ${agingClass}`}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#1A2E25', marginBottom: 2 }}>
-                        {item.bed_id}
-                        {item.source === 'missing_tracked' && <span className="b br" style={{ marginLeft: 6 }}>Missing</span>}
-                        {item.source === 'emergency' && <span className="b bo" style={{ marginLeft: 6 }}>Emergency</span>}
-                      </div>
-                      <div style={{ fontSize: 11, color: '#5F7A6A' }}>{drugName} · {item.nurse}</div>
-                      <div style={{ fontSize: 10, color: '#8BA898', marginTop: 2 }}>{fmtDTsafe(item.timestamp)}</div>
+            const drugName = p.drug_name || '(ยาไม่ระบุ)'
+            return (
+              <div key={p.docId} className={`pending-card ${agingClass}`}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#1A2E25', marginBottom: 2 }}>
+                      {p.bed_id}
+                      {p.source === 'missing_tracked' && <span className="b br" style={{ marginLeft: 6 }}>Missing</span>}
+                      {p.source === 'emergency' && <span className="b bo" style={{ marginLeft: 6 }}>Emergency</span>}
                     </div>
-                    <div className={`aging ${agingClass}`}>⏱ {hours.toFixed(1)} ชม.</div>
+                    <div style={{ fontSize: 11, color: '#5F7A6A' }}>{drugName} · {p.nurse}</div>
+                    <div style={{ fontSize: 10, color: '#8BA898', marginTop: 2 }}>{fmtDTsafe(p.timestamp)}</div>
                   </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button className="btn primary full sm" onClick={() => setReplaceModal(item)}>✓ Replace</button>
-                    <button className="btn danger sm" onClick={() => deletePending(item.docId)}>✕</button>
-                  </div>
+                  <div className={`aging ${agingClass}`}>⏱ {hours.toFixed(1)} ชม.</div>
                 </div>
-              )
-            } else {
-              // Stock Return
-              const rs = retStates[item.docId]
-              return (
-                <div key={item.docId} className={`pending-card ${agingClass}`}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#1A2E25', marginBottom: 2 }}>
-                        {item.bed} — {item.drugName}
-                        <span className="b" style={{ marginLeft: 6, background:'#E3F2FD', color:'#1565C0', border:'0.5px solid #64B5F6', padding:'2px 8px', borderRadius:12, fontSize:10, fontWeight:600 }}>เบิกไป ×{item.qty}</span>
-                      </div>
-                      <div style={{ fontSize: 11, color: '#5F7A6A' }}>{item.nurse}</div>
-                      <div style={{ fontSize: 10, color: '#8BA898', marginTop: 2 }}>{fmtDTsafe(item.timestamp)}</div>
-                    </div>
-                    <div className={`aging ${agingClass}`}>⏱ {hours.toFixed(1)} ชม.</div>
-                  </div>
-                  {!rs?.open && (
-                    <button onClick={() => openRet(item.docId)} className="btn primary full sm">Return</button>
-                  )}
-                  {rs?.open && (
-                    <div style={{ marginTop: 8, padding: 10, background: '#F5F5F5', borderRadius: 8 }}>
-                      <div style={{ fontSize: 11, color: '#666', marginBottom: 6 }}>ใส่ EXP เพื่อคืนยา</div>
-                      <button onClick={() => closeRet(item.docId)} className="btn sm">ยกเลิก</button>
-                    </div>
-                  )}
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn primary full sm" onClick={() => setReplaceModal(p)}>✓ Replace</button>
+                  <button className="btn danger sm" onClick={() => deletePending(p.docId)}>✕</button>
                 </div>
-              )
-            }
+              </div>
+            )
           })}
         </>
       )}
@@ -2206,11 +1893,7 @@ function Dashboard({ drugsWithStock, alerts, unret, lastCheck, lots, lotsOf, cal
         setPutaway({ drug, returnLots, pa, context: 'return' })
       }
     }
-    await updateDoc(doc(db, 'withdrawals', w.docId), { 
-      returned: true, 
-      retExp: validEntries[0]?.fullDate || myToISO(validEntries[0]?.expM, validEntries[0]?.expY),
-      return_timestamp: Timestamp.now()
-    })
+    await updateDoc(doc(db, 'withdrawals', w.docId), { returned: true, retExp: validEntries[0]?.fullDate || myToISO(validEntries[0]?.expM, validEntries[0]?.expY) })
     closeRet(w.docId)
   }
 
@@ -2456,13 +2139,13 @@ function Dashboard({ drugsWithStock, alerts, unret, lastCheck, lots, lotsOf, cal
               </div>
               <div style={{ flex:1, minWidth:0, paddingRight:4 }}>
                 <div style={{ fontSize:13, fontWeight:600, color:'#1565C0', wordBreak:'break-word', overflowWrap:'break-word' }}>
-                  ยาหายรอเติมคืน {missingPending.length} รายการ
+                  มียาฉุกเฉินรอเติมคืน {missingPending.length} รายการ
                 </div>
                 <div style={{ fontSize:11, color:'#1976D2', marginTop:3, lineHeight:1.5 }}>
                   🔍 Missing Tracked: {missingPending.length} รายการ
                 </div>
                 {hasOld && (
-                  <div style={{ fontSize:10, color:'#0D47A1', marginTop:3, fontWeight:500 }}>⚠️ มีรายการค้างเกิน 6 ชม.</div>
+                  <div style={{ fontSize:10, color:'#0D47A1', marginTop:3, fontWeight:500 }}>⚠️ มีรายการค้างเกิน 4 ชม.</div>
                 )}
                 <div style={{ fontSize:10, color:'#1565C0', marginTop:2 }}>กด Pending tab เพื่อเติมยาคืน</div>
               </div>
@@ -3534,11 +3217,7 @@ function Withdraw({ drugs, nurses, lots, lotsOf, withdrawals, calcPutaway, db, f
       }
     }
     const firstIso = validEntries[0].fullDate || myToISO(validEntries[0].expM, validEntries[0].expY)
-    await updateDoc(doc(db, 'withdrawals', w.docId), { 
-      returned: true, 
-      retExp: firstIso,
-      return_timestamp: Timestamp.now()
-    })
+    await updateDoc(doc(db, 'withdrawals', w.docId), { returned: true, retExp: firstIso })
     closeRet(w.docId)
   }
 
@@ -3581,6 +3260,83 @@ function Withdraw({ drugs, nurses, lots, lotsOf, withdrawals, calcPutaway, db, f
               <button className="btn primary full" onClick={submit} disabled={!nurse || !drugId || !bed}>บันทึกการใช้ยาสต็อก</button>
             </div>
           </div>
+          {withdrawals.length > 0 && (
+            <div className="card blue">
+              <div className="slbl" style={{ color: '#185FA5' }}>Pending Returns ({withdrawals.length})</div>
+              {withdrawals.map(w => {
+                const rs = retStates[w.docId]
+                const exLots = lots.filter(l => l.drugId == w.drugId && l.qty > 0).sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
+                return (
+                  <div key={w.docId} className="wrow">
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 12, fontWeight: 500 }}>{w.bed} — {w.drugName}</span>
+                        <span className="b bb">×{w.qty}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: '#8BA898', marginTop: 2 }}>{w.nurse}</div>
+                      {rs?.open && (
+                        <div className="retpanel">
+                          <div style={{ fontSize: 11, fontWeight: 500, color: '#3C3489', marginBottom: 6 }}>
+                            ระบุจำนวน + EXP ของยาที่คืน (แยกได้ถ้า EXP ต่างกัน)
+                          </div>
+                          {exLots.length > 0 && <div style={{ fontSize: 11, color: '#534AB7', background: 'rgba(83,74,183,.08)', borderRadius: 6, padding: '5px 8px', marginBottom: 8 }}>FEFO ปัจจุบัน: <b>{fmtMY(exLots[0].expiry)}</b></div>}
+                          {(rs.entries||[]).map((entry, idx) => {
+                            const retDrug = drugs.find(d => d.id == w.drugId)
+                            return (
+                              <div key={idx} style={{ background: 'rgba(83,74,183,.06)', borderRadius: 8, padding: '8px 10px', marginBottom: 8, border: '0.5px solid #CECBF6' }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+                                  <div style={{ fontSize:11, fontWeight:500, color:'#3C3489' }}>ชุดที่ {idx+1}</div>
+                                  <div className="nc" style={{ transform:'scale(.85)', transformOrigin:'left' }}>
+                                    <button onClick={() => updWRetEntry(w.docId, idx, 'qty', Math.max(1,entry.qty-1), w.drugId)}>−</button>
+                                    <span>{entry.qty}</span>
+                                    <button onClick={() => updWRetEntry(w.docId, idx, 'qty', entry.qty+1, w.drugId)}>+</button>
+                                  </div>
+                                  <span style={{ fontSize:10, color:'#8BA898' }}>{w.drugName.split(' ')[0]}</span>
+                                  {(rs.entries||[]).length > 1 && (
+                                    <button onClick={() => removeWRetEntry(w.docId, idx)} style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', fontSize:14, color:'#A32D2D' }}>✕</button>
+                                  )}
+                                </div>
+                                <ExpPicker
+                                  drug={retDrug}
+                                  expM={entry.expM} expY={entry.expY} fullDate={entry.fullDate||''}
+                                  onExpM={v => updWRetEntry(w.docId, idx, 'expM', v, w.drugId)}
+                                  onExpY={v => updWRetEntry(w.docId, idx, 'expY', v, w.drugId)}
+                                  onFullDate={v => updWRetEntry(w.docId, idx, 'fullDate', v, w.drugId)}
+                                  allowToggle={true} />
+                                {entry.preview && (
+                                  <div style={{ marginTop:6,
+                                    background: entry.preview.singleStock ? '#EEEDFE' : entry.preview.multiLot ? '#E8F4FD' : entry.preview.isFEFOSide?'#FCEBEB':'#E1F5EE',
+                                    border:`0.5px solid ${entry.preview.singleStock ? '#C09EF5' : entry.preview.multiLot ? '#90C8F0' : entry.preview.isFEFOSide?'#F7C1C1':'#9FE1CB'}`,
+                                    borderRadius:6, padding:'6px 8px', display:'flex', alignItems:'center', gap:6 }}>
+                                    <div style={{ fontSize:11, fontWeight:500,
+                                      color: entry.preview.singleStock ? '#5B3A8A' : entry.preview.multiLot ? '#185FA5' : entry.preview.isFEFOSide?'#A32D2D':'#0F6E56' }}>
+                                      {entry.preview.label}{entry.preview.reason ? ` — ${entry.preview.reason}` : ''}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                          <button onClick={() => addWRetEntry(w.docId)} className="btn sm full" style={{ marginBottom:8 }}>
+                            + เพิ่มชุด EXP (คืนยา EXP ต่างกัน)
+                          </button>
+                          <div style={{ display:'flex', gap:8 }}>
+                            <button className="btn primary sm" style={{ flex:1 }}
+                              onClick={() => confirmRet(w)}
+                              disabled={!(rs.entries||[]).some(e => e.fullDate||(e.expM&&e.expY))}>
+                              ยืนยัน Return + ดูตำแหน่งวาง
+                            </button>
+                            <button className="btn sm" onClick={() => closeRet(w.docId)}>ยกเลิก</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {!rs?.open && <button onClick={() => openRet(w.docId)} style={{ padding: '5px 11px', borderRadius: 8, border: '0.5px solid #CECBF6', background: '#EEEDFE', color: '#3C3489', fontSize: 11, fontWeight: 500, cursor: 'pointer', flexShrink: 0 }}>Return</button>}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </>
       ) : (
         <div className="card purple">
@@ -4049,11 +3805,7 @@ function History({ withdrawals, checks, lots, lotsOf, calcPutaway, fmtDT, fmtMY,
     const ex = lots.filter(l => l.drugId == w.drugId && l.qty > 0).sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
     const pa = calcPutaway(w.drugId, iso)
     const fefoExp = ex.length ? fmtMY(ex[0].expiry) : null
-    await updateDoc(doc(db, 'withdrawals', w.docId), { 
-      returned: true, 
-      retExp: iso,
-      return_timestamp: Timestamp.now()
-    })
+    await updateDoc(doc(db, 'withdrawals', w.docId), { returned: true, retExp: iso })
     await addDoc(collection(db, 'lots'), { drugId: w.drugId, qty: w.qty, expiry: iso, ts: Timestamp.now() })
     closeRet(w.docId)
     setPutaway({ drug, qty: w.qty, expiry: iso, pa, fefoExp, context: 'return' })
@@ -4120,9 +3872,9 @@ function History({ withdrawals, checks, lots, lotsOf, calcPutaway, fmtDT, fmtMY,
                     ) : w.usage_type === 'Missing_Unknown' ? (
                       <span className="b" style={{background:'#FCE4EC', color:'#AD1457', border:'0.5px solid #F06292', fontSize:10, padding:'2px 7px'}}>❓ Missing-Unk</span>
                     ) : null}
-                    {w.returned && <span className="b bg">Return แล้ว{w.retExp ? ` · EXP ${fmtMY(w.retExp)}` : ''}{w.return_timestamp ? ` · ${fmtDT(w.return_timestamp)}` : ''}</span>}
+                    {w.returned && <span className="b bg">Return แล้ว{w.retExp ? ` · EXP ${fmtMY(w.retExp)}` : ''}</span>}
                   </div>
-                  <div style={{ fontSize: 10, color: '#8BA898' }}>{w.bed} · {w.nurse}{w.note && w.note !== '(Quick)' && !w.note.includes('Replace:') && !w.note.includes('Multi Quick Use') ? ' · ' + w.note : w.note === '(Quick)' ? ' · ⚡ Quick' : ''}</div>
+                  <div style={{ fontSize: 10, color: '#8BA898' }}>{w.bed} · {w.nurse}{w.note && w.note !== '(Quick)' ? ' · ' + w.note : w.note === '(Quick)' ? ' · ⚡ Quick' : ''}</div>
                   <div style={{ fontSize: 10, color: '#8BA898', fontFamily: 'monospace' }}>{w.ts && fmtDT(w.ts)}</div>
                   {rs?.open && !w.returned && (
                     <div className="retpanel">
