@@ -135,4 +135,4 @@ export const DEFAULT_NURSES = [
 ]
 
 export const SHIFTS = ['Day Shift (เวรเดย์) 08:00–20:00', 'Night Shift (เวรไนท์) 20:00–08:00']
-export const BEDS   = ['ICU-A1','ICU-A2','ICU-A3','ICU-A4','ICU-A5','ICU-A12','ICU-A13','ICU-A14','ICU-A15','ICU-A16','ICU-A17']
+export const BEDS   = ['ICU-B1','ICU-B2','ICU-B3','ICU-B4','ICU-B6','ICU-B7','ICU-B8','ICU-B9','ICU-B10']
