@@ -883,7 +883,7 @@ export default function App() {
           <div className="bar-row">
             <div>
               <div className="bar-title">💊 Term-Ya Application</div>
-              <div className="bar-sub">Bangkok Hospital Chanthaburi : ICU-B</div>
+              <div className="bar-sub">Bangkok Hospital Chanthaburi : ICU-A</div>
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
               <button onClick={() => setGlobalScanOpen(true)}
@@ -957,6 +957,11 @@ export default function App() {
               setReplaceModal={(p) => { setReplacePending(p); setReplaceModal(true) }}
               setMissingReturnModal={(p) => { setMissingReturnPending(p); setMissingReturnModal(true) }}
               fmtDTsafe={fmtDTsafe}
+              lots={lots}
+              drugsWithStock={drugsWithStock}
+              getDrugDir={getDrugDir}
+              setPutaway={setPutaway}
+              calcPutaway={calcPutaway}
             />
           )}
           {curTab === 'setting' && (
@@ -999,6 +1004,8 @@ export default function App() {
           db={db}
           getDrugDir={getDrugDir}
           withdrawals={withdrawals}
+          setPutaway={setPutaway}
+          calcPutaway={calcPutaway}
         />
       )}
       {missingReturnModal && (
@@ -1012,6 +1019,8 @@ export default function App() {
           db={db}
           getDrugDir={getDrugDir}
           withdrawals={withdrawals}
+          setPutaway={setPutaway}
+          calcPutaway={calcPutaway}
         />
       )}
     </>
@@ -1256,7 +1265,7 @@ function SmartTimestampModal({ open, onClose, db }) {
 
 
 /* ═══ REPLACE MODAL (Multi-Drug + Partial + Success Overlay) ═══ */
-function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db, getDrugDir, withdrawals }) {
+function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db, getDrugDir, withdrawals, setPutaway, calcPutaway }) {
   const [nurse, setNurse] = useState('')
   const [nurseQuery, setNurseQuery] = useState('')
   const [nurseOpen, setNurseOpen] = useState(false)
@@ -1281,8 +1290,6 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
   
   const [cart, setCart] = useState(initialCart())
   const [saving, setSaving] = useState(false)
-  const [done, setDone] = useState(false)
-  const [doneItems, setDoneItems] = useState([])
   const [closeJob, setCloseJob] = useState(true)
 
   const getHoursSince = (ts) => {
@@ -1295,7 +1302,7 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
     if (!open) {
       setNurse(''); setNurseQuery(''); setNurseOpen(false)
       setCart(initialCart())
-      setSaving(false); setDone(false); setDoneItems([]); setCloseJob(true)
+      setSaving(false); setCloseJob(true)
     } else {
       // Reset cart when modal opens
       setCart(initialCart())
@@ -1314,8 +1321,8 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
   }
   const removeCartItem = (id) => setCart(prev => prev.filter(c => c.id !== id))
   
-  // Calculate FEFO Preview - ใช้ระบบเดียวกับ Restock + แสดงอันดับ
-  const calculateFEFO = (drugId, expiry, qtyToReplace = 0, isMissing = false) => {
+  // Calculate FEFO Preview - รวม multiple lots ที่เติมพร้อมกัน
+  const calculateFEFOWithReturns = (drugId, expiry, qtyToReplace = 0, isMissing = false, otherReturnedLots = []) => {
     if (!drugId || !expiry) return null
     
     let existingLots = lots
@@ -1338,7 +1345,17 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
     // ดู direction configuration ของยา
     const dir = getDrugDir(drugId)
     
-    if (existingLots.length === 0) {
+    // รวม existing + lots อื่นที่เติมพร้อมกัน + ยาใหม่ แล้ว sort
+    const allLots = [
+      ...existingLots.map(l => ({ expiry: l.expiry, isNew: false })),
+      ...otherReturnedLots.map(exp => ({ expiry: exp, isNew: false })),
+      { expiry, isNew: true }
+    ].sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
+    
+    const total = allLots.length
+    const newIndex = allLots.findIndex(l => l.isNew)
+    
+    if (total === 1) {
       // Single stock - lot แรก
       return { 
         label: `🟣 วางตำแหน่งที่ 1 (lot แรก)`, 
@@ -1346,15 +1363,6 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
         desc: 'lot แรก'
       }
     }
-    
-    // รวม existing + ยาใหม่ แล้ว sort
-    const allLots = [
-      ...existingLots.map(l => ({ expiry: l.expiry, isNew: false })),
-      { expiry, isNew: true }
-    ].sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
-    
-    const total = allLots.length
-    const newIndex = allLots.findIndex(l => l.isNew)
     
     // คำนวณอันดับตาม direction
     let position, label, color, positionText
@@ -1392,7 +1400,7 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
     }
     
     const newDate = new Date(expiry)
-    const fefoDate = new Date(existingLots[0].expiry)
+    const fefoDate = new Date(allLots[0].expiry)
     const isBeforeFefo = newDate <= fefoDate
     
     if (isBeforeFefo) {
@@ -1413,33 +1421,68 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
   }
   
   const updateCart = (id, field, val) => {
-    setCart(prev => prev.map(c => {
-      if (c.id !== id) return c
-      
-      const updated = { ...c, [field]: val }
-      
-      // คำนวณ FEFO preview หลังกรอก EXP
-      if ((field === 'expM' || field === 'expY' || field === 'fullDate') && updated.drugId) {
-        const isMissing = pending?.source === 'missing_tracked'
-        const drug = drugsWithStock().find(d => d.id == updated.drugId)
-        if (drug?.fullDateExp && updated.fullDate) {
-          updated.fefoPreview = calculateFEFO(updated.drugId, updated.fullDate, updated.qty || 0, isMissing)
-        } else if (!drug?.fullDateExp && updated.expM && updated.expY) {
-          const lastDay = new Date(+updated.expY, +updated.expM, 0).getDate()
-          const expiry = `${updated.expY}-${String(updated.expM).padStart(2,'0')}-${lastDay}`
-          updated.fefoPreview = calculateFEFO(updated.drugId, expiry, updated.qty || 0, isMissing)
-        } else {
-          updated.fefoPreview = null
+    setCart(prev => {
+      const updated = prev.map(c => {
+        if (c.id !== id) return c
+        const u = { ...c, [field]: val }
+        
+        // Clear preview ถ้าเปลี่ยนยา
+        if (field === 'drugId') {
+          u.fefoPreview = null
         }
-      }
+        
+        return u
+      })
       
-      // Clear preview ถ้าเปลี่ยนยา
-      if (field === 'drugId') {
-        updated.fefoPreview = null
-      }
+      // Recalculate FEFO for ALL items after any update
+      const isMissing = pending?.source === 'missing_tracked'
       
-      return updated
-    }))
+      return updated.map(item => {
+        if (!item.drugId || ((!item.expM || !item.expY) && !item.fullDate)) {
+          return { ...item, fefoPreview: null }
+        }
+        
+        const drug = drugsWithStock().find(d => d.id == item.drugId)
+        if (!drug) return { ...item, fefoPreview: null }
+        
+        // คำนวณ expiry ของ item นี้
+        let expiry
+        if (drug?.fullDateExp && item.fullDate) {
+          expiry = item.fullDate
+        } else if (!drug?.fullDateExp && item.expM && item.expY) {
+          const lastDay = new Date(+item.expY, +item.expM, 0).getDate()
+          expiry = `${item.expY}-${String(item.expM).padStart(2,'0')}-${lastDay}`
+        } else {
+          return { ...item, fefoPreview: null }
+        }
+        
+        // หา expiry ของ lots อื่นที่เติมพร้อมกัน
+        const otherReturnedLots = updated
+          .filter(c => c.id !== item.id && c.drugId == item.drugId)
+          .map(c => {
+            if (drug?.fullDateExp && c.fullDate) {
+              return c.fullDate
+            } else if (!drug?.fullDateExp && c.expM && c.expY) {
+              const lastDay = new Date(+c.expY, +c.expM, 0).getDate()
+              return `${c.expY}-${String(c.expM).padStart(2,'0')}-${lastDay}`
+            }
+            return null
+          })
+          .filter(Boolean)
+        
+        // คำนวณ FEFO รวมกับ lots อื่น
+        return {
+          ...item,
+          fefoPreview: calculateFEFOWithReturns(
+            item.drugId, 
+            expiry, 
+            item.qty || 0, 
+            isMissing,
+            otherReturnedLots
+          )
+        }
+      })
+    })
   }
 
   const submit = async () => {
@@ -1448,11 +1491,13 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
     if (validItems.length === 0) return alert('กรุณาเลือกยาอย่างน้อย 1 รายการ')
 
     setSaving(true)
-    const done_info = []
     try {
       const dl = drugsWithStock()
       const recon_mins = Math.round(getHoursSince(pending.timestamp) * 60)
 
+      // Group items by drugId for PutawayOverlay
+      const drugGroups = {}
+      
       for (const item of validItems) {
         const drug = dl.find(d => d.id == item.drugId)
         if (!drug) continue
@@ -1528,8 +1573,12 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
             reconciliation_time_minutes: recon_mins
           })
         }
-
-        done_info.push({ name: drug.name, qty: item.qty, unit: drug.unit, expiry: newExpiry })
+        
+        // Group lots by drugId for overlay
+        if (!drugGroups[drug.id]) {
+          drugGroups[drug.id] = { drug, lots: [] }
+        }
+        drugGroups[drug.id].lots.push({ expiry: newExpiry, qty: item.qty })
       }
 
       // 4. Close pending if requested
@@ -1542,8 +1591,49 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
         })
       }
 
-      setDoneItems(done_info)
-      setDone(true)
+      // 5. Show PutawayOverlay แทน success screen
+      // ถ้ามีหลายยา แสดงแค่ยาแรก (หรือแยกแสดงทีละยาก็ได้)
+      const firstDrugId = Object.keys(drugGroups)[0]
+      if (firstDrugId) {
+        const { drug, lots: returnLots } = drugGroups[firstDrugId]
+        
+        if (drug?.singleStock) {
+          const group = STORAGE_GROUPS.find(g => g.id === drug.groupId)
+          setPutaway({
+            drug,
+            qty: returnLots[0].qty,
+            expiry: returnLots[0].expiry,
+            context: 'return',
+            singleStock: true,
+            groupName: group?.name || '',
+            groupIcon: group?.icon || '📦'
+          })
+        } else {
+          // Multi-lot or single lot
+          const sortedLots = returnLots.sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
+          const pa = calcPutaway(drug.id, sortedLots[0].expiry)
+          
+          if (sortedLots.length === 1) {
+            setPutaway({
+              drug,
+              qty: sortedLots[0].qty,
+              expiry: sortedLots[0].expiry,
+              pa,
+              context: 'return'
+            })
+          } else {
+            setPutaway({
+              drug,
+              returnLots: sortedLots,
+              pa,
+              context: 'return'
+            })
+          }
+        }
+      }
+      
+      // Close modal
+      onClose()
     } catch (e) {
       alert('เกิดข้อผิดพลาด: ' + e.message)
     }
@@ -1556,27 +1646,6 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
   const months = ['01','02','03','04','05','06','07','08','09','10','11','12']
   const thM = ['Jan.','Feb.','Mar.','Apr.','May','Jun.','Jul.','Aug.','Sep.','Oct.','Nov.','Dec.']
   const years = Array.from({length:10},(_,i)=>curYear+i)
-
-  // ── Success Screen ──
-  if (done) return (
-    <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, background:'rgba(0,0,0,0.65)', zIndex:500, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
-      <div style={{ background:'#fff', borderRadius:'14px 14px 0 0', width:'100%', maxWidth:480, padding:'28px 20px 36px', textAlign:'center' }}>
-        <div style={{ fontSize:52, marginBottom:10 }}>✅</div>
-        <div style={{ fontSize:17, fontWeight:600, color:'#0F6E56', marginBottom:4 }}>เติมยาคืนสำเร็จ!</div>
-        <div style={{ fontSize:12, color:'#5F7A6A', marginBottom:2 }}>เตียง {pending.bed_id} · โดย {nurse}</div>
-        {!closeJob && <div style={{ fontSize:11, color:'#E65100', marginTop:2, fontWeight:500 }}>⚠️ รายการ Pending ยังเปิดอยู่ (คืนบางส่วน)</div>}
-        <div style={{ border:'0.5px solid #E0EAE5', borderRadius:10, overflow:'hidden', margin:'14px 0', textAlign:'left' }}>
-          {doneItems.map((item, i) => (
-            <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'9px 14px', fontSize:12, borderBottom: i < doneItems.length-1 ? '0.5px solid #EEF4F0' : 'none' }}>
-              <span>{item.name}</span>
-              <span style={{ color:'#0F6E56', fontWeight:500 }}>×{item.qty} {item.unit}</span>
-            </div>
-          ))}
-        </div>
-        <button className="btn primary full" onClick={onClose}>ปิด</button>
-      </div>
-    </div>
-  )
 
   // ── Main Form ──
   return (
@@ -1762,7 +1831,7 @@ function ConfirmModal({ open, title, message, icon, onConfirm, onCancel, confirm
 
 
 /* ═══ PENDING VIEW TAB ═══ */
-function PendingView({ pendingSyncs, withdrawals, drugs, nurses, db, setReplaceModal, setMissingReturnModal, fmtDTsafe }) {
+function PendingView({ pendingSyncs, withdrawals, drugs, nurses, db, setReplaceModal, setMissingReturnModal, fmtDTsafe, lots, drugsWithStock, getDrugDir, setPutaway, calcPutaway }) {
   const pending = pendingSyncs.filter(p => p.status === 'pending')
   
   // รวม Stock Returns (withdrawals ที่ยังไม่ได้คืน และไม่มี pending_sync_id)
@@ -1815,8 +1884,288 @@ function PendingView({ pendingSyncs, withdrawals, drugs, nurses, db, setReplaceM
     setPendingDeleteId(null)
   }
   
-  const openRet = (docId) => setRetStates(prev => ({ ...prev, [docId]: { open: true, entries: [{ qty: 1, expM: '', expY: '', fullDate: '' }] } }))
+  // Calculate FEFO Preview for inline return form
+  const calculateFEFO = (drugId, expiry) => {
+    if (!drugId || !expiry) return null
+    
+    const existingLots = lots
+      .filter(l => l.drugId == drugId && l.qty > 0)
+      .sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
+    
+    const dir = getDrugDir(drugId)
+    
+    if (existingLots.length === 0) {
+      return { 
+        label: `🟣 วางตำแหน่งที่ 1 (lot แรก)`, 
+        color: '#9C27B0', 
+        desc: 'lot แรก'
+      }
+    }
+    
+    const allLots = [
+      ...existingLots.map(l => ({ expiry: l.expiry, isNew: false })),
+      { expiry, isNew: true }
+    ].sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
+    
+    const total = allLots.length
+    const newIndex = allLots.findIndex(l => l.isNew)
+    
+    let position, label, color, positionText
+    
+    if (dir === 'rtl') {
+      position = newIndex + 1
+      positionText = position === 1 ? 'ขวาสุด' : position === total ? 'ซ้ายสุด' : `ที่ ${position} นับจากขวา`
+    } else if (dir === 'fb') {
+      position = newIndex + 1
+      positionText = position === 1 ? 'หน้าสุด' : position === total ? 'หลังสุด' : `ที่ ${position} นับจากหน้า`
+    } else {
+      position = newIndex + 1
+      positionText = position === 1 ? 'ซ้ายสุด' : position === total ? 'ขวาสุด' : `ที่ ${position} นับจากซ้าย`
+    }
+    
+    const newDate = new Date(expiry)
+    const fefoDate = new Date(existingLots[0].expiry)
+    const isBeforeFefo = newDate <= fefoDate
+    
+    color = isBeforeFefo ? '#4CAF50' : '#F44336'
+    label = isBeforeFefo ? `🟢 วาง${positionText}` : `🔴 วาง${positionText}`
+    
+    return { label, color, desc: `จาก ${total} ตำแหน่ง` }
+  }
+  
+  const openRet = (docId, drugId) => {
+    const dl = drugsWithStock()
+    const drug = dl.find(d => d.id == drugId)
+    setRetStates(prev => ({ 
+      ...prev, 
+      [docId]: { 
+        open: true, 
+        entries: [{ 
+          id: 1, 
+          qty: 1, 
+          expM: '', 
+          expY: '', 
+          fullDate: '', 
+          fefoPreview: null 
+        }],
+        useFull: drug?.fullDateExp || false
+      } 
+    }))
+  }
+  
   const closeRet = (docId) => setRetStates(prev => { const n = { ...prev }; delete n[docId]; return n })
+  
+  const addRetEntry = (docId) => {
+    setRetStates(prev => ({
+      ...prev,
+      [docId]: {
+        ...prev[docId],
+        entries: [...prev[docId].entries, { id: Date.now(), qty: 1, expM: '', expY: '', fullDate: '', fefoPreview: null }]
+      }
+    }))
+  }
+  
+  const removeRetEntry = (docId, entryId) => {
+    setRetStates(prev => ({
+      ...prev,
+      [docId]: {
+        ...prev[docId],
+        entries: prev[docId].entries.filter(e => e.id !== entryId)
+      }
+    }))
+  }
+  
+  const updateRetEntry = (docId, entryId, field, val, drugId) => {
+    setRetStates(prev => {
+      const state = prev[docId]
+      const updatedEntries = state.entries.map(e => {
+        if (e.id !== entryId) return e
+        
+        const updated = { ...e, [field]: val }
+        
+        return updated
+      })
+      
+      // Recalculate FEFO for ALL entries after any update
+      const finalEntries = updatedEntries.map(entry => {
+        if ((entry.expM && entry.expY) || entry.fullDate) {
+          const dl = drugsWithStock()
+          const drug = dl.find(d => d.id == drugId)
+          
+          let expiry
+          if (drug?.fullDateExp && entry.fullDate) {
+            expiry = entry.fullDate
+          } else if (!drug?.fullDateExp && entry.expM && entry.expY) {
+            const lastDay = new Date(+entry.expY, +entry.expM, 0).getDate()
+            expiry = `${entry.expY}-${String(entry.expM).padStart(2,'0')}-${lastDay}`
+          } else {
+            return { ...entry, fefoPreview: null }
+          }
+          
+          // Calculate FEFO considering ALL returned lots
+          const allReturnedLots = updatedEntries
+            .filter(e => e.id !== entry.id && ((e.expM && e.expY) || e.fullDate))
+            .map(e => {
+              if (drug?.fullDateExp && e.fullDate) {
+                return e.fullDate
+              } else if (!drug?.fullDateExp && e.expM && e.expY) {
+                const lastDay = new Date(+e.expY, +e.expM, 0).getDate()
+                return `${e.expY}-${String(e.expM).padStart(2,'0')}-${lastDay}`
+              }
+              return null
+            })
+            .filter(Boolean)
+          
+          return { ...entry, fefoPreview: calculateFEFOWithReturns(drugId, expiry, allReturnedLots) }
+        }
+        return { ...entry, fefoPreview: null }
+      })
+      
+      return {
+        ...prev,
+        [docId]: { ...state, entries: finalEntries }
+      }
+    })
+  }
+  
+  // Calculate FEFO including other returned lots
+  const calculateFEFOWithReturns = (drugId, expiry, otherReturnedLots = []) => {
+    if (!drugId || !expiry) return null
+    
+    const existingLots = lots
+      .filter(l => l.drugId == drugId && l.qty > 0)
+      .sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
+    
+    const dir = getDrugDir(drugId)
+    
+    // Combine existing + all returned lots (including this one)
+    const allLots = [
+      ...existingLots.map(l => ({ expiry: l.expiry, isNew: false })),
+      ...otherReturnedLots.map(exp => ({ expiry: exp, isNew: false })),
+      { expiry, isNew: true }
+    ].sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
+    
+    const total = allLots.length
+    const newIndex = allLots.findIndex(l => l.isNew)
+    
+    if (total === 1) {
+      return { 
+        label: `🟣 วางตำแหน่งที่ 1 (lot แรก)`, 
+        color: '#9C27B0', 
+        desc: 'lot แรก',
+        position: 1,
+        total: 1
+      }
+    }
+    
+    let position, label, color, positionText
+    
+    if (dir === 'rtl') {
+      position = newIndex + 1
+      positionText = position === 1 ? 'ขวาสุด' : position === total ? 'ซ้ายสุด' : `ที่ ${position} นับจากขวา`
+    } else if (dir === 'fb') {
+      position = newIndex + 1
+      positionText = position === 1 ? 'หน้าสุด' : position === total ? 'หลังสุด' : `ที่ ${position} นับจากหน้า`
+    } else {
+      position = newIndex + 1
+      positionText = position === 1 ? 'ซ้ายสุด' : position === total ? 'ขวาสุด' : `ที่ ${position} นับจากซ้าย`
+    }
+    
+    const newDate = new Date(expiry)
+    const fefoDate = new Date(allLots[0].expiry)
+    const isBeforeFefo = newDate <= fefoDate
+    
+    color = isBeforeFefo ? '#4CAF50' : '#F44336'
+    label = isBeforeFefo ? `🟢 วาง${positionText}` : `🔴 วาง${positionText}`
+    
+    return { 
+      label, 
+      color, 
+      desc: `จาก ${total} ตำแหน่ง`,
+      position,
+      total
+    }
+  }
+  
+  const submitReturn = async (withdrawal) => {
+    const state = retStates[withdrawal.docId]
+    if (!state) return
+    
+    const validEntries = state.entries.filter(e => (e.expM && e.expY) || e.fullDate)
+    if (validEntries.length === 0) return alert('กรุณากรอก EXP อย่างน้อย 1 รายการ')
+    
+    try {
+      const dl = drugsWithStock()
+      const drug = dl.find(d => d.id == withdrawal.drugId)
+      if (!drug) throw new Error('ไม่พบข้อมูลยา')
+      
+      // บันทึกทุก lot ลง Firebase ก่อน
+      for (const entry of validEntries) {
+        const iso = state.useFull
+          ? entry.fullDate || '2099-12-31'
+          : (entry.expM && entry.expY
+            ? myToISO(entry.expM, entry.expY)
+            : '2099-12-31')
+        
+        await addDoc(collection(db, 'lots'), {
+          drugId: drug.id,
+          qty: entry.qty,
+          expiry: iso,
+          addedAt: Timestamp.now(),
+          source: 'return',
+          loaned: false
+        })
+      }
+      
+      // Update withdrawal
+      const firstIso = validEntries[0].fullDate || myToISO(validEntries[0].expM, validEntries[0].expY)
+      await updateDoc(doc(db, 'withdrawals', withdrawal.docId), {
+        returned: true,
+        retExp: firstIso,
+        return_timestamp: Timestamp.now()
+      })
+      
+      // แสดง PutawayOverlay แบบเดียวกับ restock
+      if (validEntries.length > 0) {
+        if (drug?.singleStock) {
+          const group = STORAGE_GROUPS.find(g => g.id === drug.groupId)
+          const firstIso = validEntries[0].fullDate || myToISO(validEntries[0].expM, validEntries[0].expY)
+          setPutaway({ 
+            drug, 
+            qty: validEntries[0].qty, 
+            expiry: firstIso, 
+            context: 'return', 
+            singleStock: true, 
+            groupName: group?.name || '', 
+            groupIcon: group?.icon || '📦' 
+          })
+        } else {
+          // Multi-lot return: ส่ง returnLots array
+          const returnLots = validEntries
+            .map(e => ({ 
+              expiry: e.fullDate || myToISO(e.expM, e.expY), 
+              qty: e.qty 
+            }))
+            .filter(e => e.expiry)
+            .sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
+          
+          const firstIso = returnLots[0].expiry
+          const pa = calcPutaway(withdrawal.drugId, firstIso)
+          
+          setPutaway({ 
+            drug, 
+            returnLots, 
+            pa, 
+            context: 'return' 
+          })
+        }
+      }
+      
+      closeRet(withdrawal.docId)
+    } catch (e) {
+      alert('เกิดข้อผิดพลาด: ' + e.message)
+    }
+  }
 
   return (
     <div className="scroll">
@@ -1879,8 +2228,13 @@ function PendingView({ pendingSyncs, withdrawals, drugs, nurses, db, setReplaceM
                 </div>
               )
             } else {
-              // Stock Return
+              // Stock Return - inline form with FEFO preview
               const rs = retStates[item.docId]
+              const curYear = new Date().getFullYear()
+              const months = ['01','02','03','04','05','06','07','08','09','10','11','12']
+              const thM = ['Jan.','Feb.','Mar.','Apr.','May','Jun.','Jul.','Aug.','Sep.','Oct.','Nov.','Dec.']
+              const years = Array.from({length:10},(_,i)=>curYear+i)
+              
               return (
                 <div key={item.docId} className={`pending-card ${agingClass}`}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 8 }}>
@@ -1894,13 +2248,109 @@ function PendingView({ pendingSyncs, withdrawals, drugs, nurses, db, setReplaceM
                     </div>
                     <div className={`aging ${agingClass}`}>⏱ {hours.toFixed(1)} ชม.</div>
                   </div>
+                  
                   {!rs?.open && (
-                    <button onClick={() => openRet(item.docId)} className="btn primary full sm">Return</button>
+                    <button onClick={() => openRet(item.docId, item.drugId)} className="btn primary full sm">
+                      ยืนยัน Return + ดูตำแหน่งการวาง
+                    </button>
                   )}
+                  
                   {rs?.open && (
-                    <div style={{ marginTop: 8, padding: 10, background: '#F5F5F5', borderRadius: 8 }}>
-                      <div style={{ fontSize: 11, color: '#666', marginBottom: 6 }}>ใส่ EXP เพื่อคืนยา</div>
-                      <button onClick={() => closeRet(item.docId)} className="btn sm">ยกเลิก</button>
+                    <div style={{ marginTop: 8, padding: '10px 12px', background: '#F9FCF9', border: '0.5px solid #D8EAE0', borderRadius: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 500, color: '#1A2E25', marginBottom: 8 }}>
+                        ระบุ EXP ของยาที่คืน
+                        {rs.entries.length === 1 && (
+                          <button onClick={() => addRetEntry(item.docId)} 
+                            style={{ float: 'right', fontSize: 10, padding: '2px 8px', background: '#E1F5EE', border: '0.5px solid #9FE1CB', borderRadius: 6, color: '#0F6E56', cursor: 'pointer' }}>
+                            + เพิ่ม lot (ถ้า EXP ต่าง)
+                          </button>
+                        )}
+                      </div>
+                      
+                      <div style={{ fontSize: 11, color: '#5F7A6A', marginBottom: 8, padding: '6px 10px', background: '#E3F2FD', borderRadius: 6 }}>
+                        💡 FEFO ปัจจุบัน: 03/2027
+                      </div>
+                      
+                      {rs.entries.map((entry, idx) => (
+                        <div key={entry.id} style={{ marginBottom: 8, padding: '8px 10px', background: '#fff', border: '0.5px solid #E0EAE5', borderRadius: 6 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                            <div style={{ fontSize: 10, fontWeight: 500, color: '#5F7A6A' }}>ชุดที่ {idx + 1}</div>
+                            {rs.entries.length > 1 && (
+                              <button onClick={() => removeRetEntry(item.docId, entry.id)}
+                                style={{ background: 'none', border: 'none', color: '#A32D2D', fontSize: 14, cursor: 'pointer' }}>✕</button>
+                            )}
+                          </div>
+                          
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
+                            <div>
+                              <div style={{ fontSize: 10, color: '#5F7A6A', marginBottom: 2 }}>จำนวน</div>
+                              <input type="number" value={entry.qty} min="1"
+                                onChange={e => updateRetEntry(item.docId, entry.id, 'qty', Math.max(1, parseInt(e.target.value) || 1), item.drugId)}
+                                style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '0.5px solid #D8EAE0', borderRadius: 6 }} />
+                            </div>
+                            {rs.useFull ? (
+                              <div>
+                                <div style={{ fontSize: 10, color: '#5F7A6A', marginBottom: 2 }}>EXP (วัน/เดือน/ปี)</div>
+                                <input type="date" value={entry.fullDate}
+                                  onChange={e => updateRetEntry(item.docId, entry.id, 'fullDate', e.target.value, item.drugId)}
+                                  min={new Date().toISOString().split('T')[0]}
+                                  style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '0.5px solid #D8EAE0', borderRadius: 6 }} />
+                              </div>
+                            ) : (
+                              <div>
+                                <div style={{ fontSize: 10, color: '#5F7A6A', marginBottom: 2 }}>เดือน EXP</div>
+                                <select value={entry.expM} 
+                                  onChange={e => updateRetEntry(item.docId, entry.id, 'expM', e.target.value, item.drugId)}
+                                  style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '0.5px solid #D8EAE0', borderRadius: 6 }}>
+                                  <option value="">-- Month --</option>
+                                  {months.map((m,i) => <option key={m} value={m}>{m} ({thM[i]})</option>)}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {!rs.useFull && (
+                            <div style={{ marginBottom: 6 }}>
+                              <div style={{ fontSize: 10, color: '#5F7A6A', marginBottom: 2 }}>EXP Year</div>
+                              <select value={entry.expY}
+                                onChange={e => updateRetEntry(item.docId, entry.id, 'expY', e.target.value, item.drugId)}
+                                style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '0.5px solid #D8EAE0', borderRadius: 6 }}>
+                                <option value="">-- Year --</option>
+                                {years.map(y => <option key={y} value={y}>{y}</option>)}
+                              </select>
+                            </div>
+                          )}
+                          
+                          {/* FEFO Preview */}
+                          {entry.fefoPreview && (
+                            <div style={{ 
+                              padding: '6px 10px', 
+                              background: entry.fefoPreview.color + '15',
+                              border: `0.5px solid ${entry.fefoPreview.color}80`,
+                              borderRadius: 6,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6
+                            }}>
+                              <div style={{ fontSize: 10, fontWeight: 600, color: entry.fefoPreview.color }}>
+                                {entry.fefoPreview.label}
+                              </div>
+                              <div style={{ fontSize: 9, color: '#5F7A6A', flex: 1 }}>
+                                {entry.fefoPreview.desc}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      
+                      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                        <button onClick={() => closeRet(item.docId)} className="btn sm" style={{ flex: 1 }}>
+                          ยกเลิก
+                        </button>
+                        <button onClick={() => submitReturn(item)} className="btn primary sm" style={{ flex: 1 }}>
+                          ยืนยัน Return + ดูตำแหน่งการวาง
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -4272,7 +4722,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
     const c = calcCompliance(reportDays)
     let csv = `=== รายงานอัตราการเช็คสต็อกยา ===\r\n`
     csv += `ช่วงเวลา: ${reportDays} วันย้อนหลัง\r\n`
-    csv += `Bangkok Hospital Chanthaburi : ICU-B\r\n\r\n`
+    csv += `Bangkok Hospital Chanthaburi : ICU-A\r\n\r\n`
     csv += `สรุป:\r\n`
     csv += `เป้าหมาย,${c.expected} ครั้ง (${c.days} วัน × 2 เวร)\r\n`
     csv += `เช็คจริง,${c.actual} ครั้ง\r\n`
@@ -4325,7 +4775,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
     filtered.forEach(w => { drugUsage[w.drugName] = (drugUsage[w.drugName]||0) + w.qty })
     const topDrugs = Object.entries(drugUsage).sort((a,b)=>b[1]-a[1]).slice(0,5)
 
-    let csv = `Bangkok Hospital Chanthaburi : ICU-B\r\n`
+    let csv = `Bangkok Hospital Chanthaburi : ICU-A\r\n`
     csv += `=== ประวัติการใช้ยา/Return : ${mLabel} ===\r\n\r\n`
     csv += `=== สรุปทั่วไป ===\r\n`
     csv += `จำนวนครั้งใช้ยาทั้งหมด,${totalUses}\r\n`
@@ -4500,7 +4950,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
       return ts.getFullYear() === ry && ts.getMonth()+1 === rm
     })
     const snapNote = snap ? `(Snapshot: ${snap.monthKey})` : '(ไม่มี Snapshot — ใช้ข้อมูล ณ ปัจจุบัน)'
-    let csv = `=== Term-Ya Monthly Report ===\r\n${mLabel}  ${snapNote}\r\nBangkok Hospital Chanthaburi : ICU-B\r\n\r\n`
+    let csv = `=== Term-Ya Monthly Report ===\r\n${mLabel}  ${snapNote}\r\nBangkok Hospital Chanthaburi : ICU-A\r\n\r\n`
     // ── ส่วนสต็อก ──
     csv += 'ชื่อยา,สต็อก,par,FEFO EXP,สถานะ\r\n'
     if (snap?.allDrugStocks?.length) {
@@ -4629,7 +5079,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
       .find(c=>c.totalDrugs)?.totalDrugs || 0
 
     // ── Section 1: Monthly Summary ──
-    let csv = `Bangkok Hospital Chanthaburi : ICU-B\r\n`
+    let csv = `Bangkok Hospital Chanthaburi : ICU-A\r\n`
     csv += `=== รายงานประจำเดือน : ${mName} ===\r\n\r\n`
     csv += `=== สรุปรายเดือน ===\r\n`
     csv += `เดือน,Compliance Rate (%),เช็คจริง,เป้าหมาย,`
@@ -4709,7 +5159,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
 
   const exportExpirySnapshots = () => {
     if (!expirySnapshots.length) { alert('ยังไม่มีข้อมูล Snapshot (จะบันทึกอัตโนมัติเมื่อเปิดแอปในต้นเดือนถัดไป)'); return }
-    let csv = `Bangkok Hospital Chanthaburi : ICU-B\r\n`
+    let csv = `Bangkok Hospital Chanthaburi : ICU-A\r\n`
     csv += `=== Expiry Snapshot รายเดือน ===\r\n\r\n`
     csv += `=== สรุปทุกเดือน ===\r\n`
     csv += `เดือน,หมดอายุ (lot),เกินเวลาแลก (lot),ถึงเวลาแลก (lot)\r\n`
