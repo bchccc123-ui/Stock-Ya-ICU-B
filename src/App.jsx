@@ -376,6 +376,29 @@ function PutawayOverlay({ drug, drugs, qty, expiry, returnLots, pa, fefoExp, con
             const itemDrug = item.drug
             const isSingle = item.singleStock
             
+            // คำนวณตำแหน่งสำหรับยาธรรมดา
+            let positionText = ''
+            if (!isSingle && item.pa) {
+              const dir = item.pa.direction || 'ltr'
+              const position = item.pa.position || 1
+              const total = (item.pa.existingLots?.length || 0) + 1
+              
+              if (dir === 'rtl') {
+                if (position === 1) positionText = 'ขวาสุด'
+                else if (position === total) positionText = 'ซ้ายสุด'
+                else positionText = `ที่ ${position} นับจากขวา`
+              } else if (dir === 'fb') {
+                if (position === 1) positionText = 'หน้าสุด'
+                else if (position === total) positionText = 'หลังสุด'
+                else positionText = `ที่ ${position} นับจากหน้า`
+              } else {
+                if (position === 1) positionText = 'ซ้ายสุด'
+                else if (position === total) positionText = 'ขวาสุด'
+                else positionText = `ที่ ${position} นับจากซ้าย`
+              }
+              positionText += ` (จาก ${total} ตำแหน่ง)`
+            }
+            
             return (
               <div key={idx} style={{ background:'rgba(0,0,0,0.25)', borderRadius:12, padding:12, border:'1px solid rgba(255,255,255,0.1)' }}>
                 {/* Header */}
@@ -387,7 +410,7 @@ function PutawayOverlay({ drug, drugs, qty, expiry, returnLots, pa, fefoExp, con
                     <div>
                       <div style={{ fontSize:14, fontWeight:600, color:'#fff' }}>{itemDrug.name}</div>
                       <div style={{ fontSize:10, color:'rgba(255,255,255,0.5)' }}>
-                        EXP {fmtMY(item.expiry)} · {item.qty || item.returnLots?.reduce((s,l)=>s+l.qty,0) || 1} {itemDrug.unit} · {isSingle ? 'ทิม' : 'คืน'}
+                        EXP {fmtMY(item.expiry)} · {item.qty || item.returnLots?.reduce((s,l)=>s+l.qty,0) || 1} {itemDrug.unit}
                       </div>
                     </div>
                   </div>
@@ -402,18 +425,27 @@ function PutawayOverlay({ drug, drugs, qty, expiry, returnLots, pa, fefoExp, con
                 {isSingle ? (
                   // Single Stock: แสดง slot
                   <div style={{ background:'rgba(245,166,35,0.1)', border:'1px solid rgba(245,166,35,0.3)', borderRadius:8, padding:8 }}>
-                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:4 }}>📦 Slot {item.groupName || item.groupIcon}</div>
-                    <div style={{ fontSize:12, color:'#F5A623', fontWeight:600 }}>
-                      Single stock - วางตรงนี้แล้วนำของเดิมออก FEFO
+                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:4 }}>📍 ตำแหน่งการวาง</div>
+                    <div style={{ fontSize:13, color:'#F5A623', fontWeight:700, marginBottom:2 }}>
+                      📦 {item.groupName || 'Slot'}
+                    </div>
+                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.7)' }}>
+                      วางแทนของเดิม (Single stock)
                     </div>
                   </div>
                 ) : (
-                  // Multi-lot: แสดง timeline
+                  // Multi-lot: แสดง position ชัดเจน
                   <div style={{ background:'rgba(93,219,167,0.08)', border:'1px solid rgba(93,219,167,0.2)', borderRadius:8, padding:8 }}>
                     {item.returnLots && item.returnLots.length > 1 ? (
                       <>
-                        <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:6 }}>
-                          รายละเอียด {item.returnLots.length} รายการ
+                        <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:4 }}>
+                          📍 ตำแหน่งการวาง
+                        </div>
+                        <div style={{ fontSize:13, color:'#5DDBA7', fontWeight:700, marginBottom:4 }}>
+                          {positionText || 'ตรวจสอบ FEFO'}
+                        </div>
+                        <div style={{ fontSize:11, color:'rgba(255,255,255,0.7)', marginBottom:6 }}>
+                          คืน {item.returnLots.length} lots
                         </div>
                         <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
                           {item.returnLots.map((lot, lotIdx) => (
@@ -426,7 +458,10 @@ function PutawayOverlay({ drug, drugs, qty, expiry, returnLots, pa, fefoExp, con
                     ) : (
                       <>
                         <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:4 }}>
-                          รายละเอียด 1 ({item.pa ? 'พร้อมส่ง' : 'พร้อมส่ง'})
+                          📍 ตำแหน่งการวาง
+                        </div>
+                        <div style={{ fontSize:13, color:'#5DDBA7', fontWeight:700, marginBottom:2 }}>
+                          {positionText || 'วางตาม FEFO'}
                         </div>
                         <div style={{ fontSize:10, padding:'4px 8px', display:'inline-block', borderRadius:6, background:'rgba(93,219,167,0.15)', border:'1px solid rgba(93,219,167,0.3)', color:'#5DDBA7', fontWeight:600 }}>
                           EXP {fmtMY(item.expiry)}
@@ -440,21 +475,8 @@ function PutawayOverlay({ drug, drugs, qty, expiry, returnLots, pa, fefoExp, con
           })}
         </div>
         
-        {/* Status badges */}
-        <div style={{ display:'flex', gap:6, marginBottom:16, flexWrap:'wrap', justifyContent:'center' }}>
-          <div style={{ fontSize:10, padding:'4px 10px', borderRadius:12, background:'rgba(93,219,167,0.15)', color:'#5DDBA7', border:'1px solid rgba(93,219,167,0.3)' }}>
-            ✓ รายชอย
-          </div>
-          <div style={{ fontSize:10, padding:'4px 10px', borderRadius:12, background:'rgba(93,219,167,0.15)', color:'#5DDBA7', border:'1px solid rgba(93,219,167,0.3)' }}>
-            ✓ คืนตรอง
-          </div>
-          <div style={{ fontSize:10, padding:'4px 10px', borderRadius:12, background:'rgba(93,219,167,0.15)', color:'#5DDBA7', border:'1px solid rgba(93,219,167,0.3)' }}>
-            ✓ ปะผัง
-          </div>
-        </div>
-        
         <button onClick={onDone} style={{ background:'#5DDBA7', border:'none', borderRadius:12, padding:13, color:'#050D0A', fontFamily:'inherit', fontSize:14, fontWeight:800, cursor:'pointer', width:'100%' }}>
-          ✓ ขันมีรายแลว
+          ✓ ยืนยัน — วางยาแล้ว
         </button>
       </div>
     )
