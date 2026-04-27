@@ -3304,6 +3304,7 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
   const [step, setStep]       = useState('setup')
   const [nurse, setNurse]     = useState(''); const [nQ, setNQ] = useState(''); const [nOpen, setNOpen] = useState(false)
   const [shift, setShift]     = useState('')
+  const [fridgeTemp, setFridgeTemp] = useState('')
   const [counts, setCounts]   = useState({})
   const [search, setSearch]   = useState('')
   const [saving, setSaving]   = useState(false)
@@ -3339,6 +3340,7 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
       const isStaleDay = d.startTs && new Date(d.startTs).toDateString() !== new Date().toDateString()
       if (d.nurse) { setNurse(d.nurse); setNQ(d.nurse) }
       if (d.shift) setShift(d.shift)
+      if (d.fridgeTemp !== undefined) setFridgeTemp(d.fridgeTemp)
       if (d.counts) setCounts(d.counts)
       if (d.confirmedGroups) setConfirmedGroups(d.confirmedGroups)
       if (d.expandedGroup) setExpandedGroup(d.expandedGroup)
@@ -3367,13 +3369,13 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
     if (!nurse && !shift && Object.keys(counts).length === 0) return
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({
-        nurse, shift, counts, confirmedGroups, step, expandedGroup,
+        nurse, shift, fridgeTemp, counts, confirmedGroups, step, expandedGroup,
         startTs: startTs?.toMillis ? startTs.toMillis() : null,
         activeMs,
         // pausedAt จะถูก set ตอน unmount เท่านั้น — ไม่ save ที่นี่
       }))
     } catch(e) {}
-  }, [nurse, shift, counts, confirmedGroups, step, startTs, activeMs, expandedGroup, draftRestored])
+  }, [nurse, shift, fridgeTemp, counts, confirmedGroups, step, startTs, activeMs, expandedGroup, draftRestored])
 
   // ── Pause timer เมื่อ app ไป background (visibilitychange) ──
   useEffect(() => {
@@ -3419,7 +3421,7 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
     setSessionStart(null); sessionStartRef.current = null
     setPauseModal(null)
     setExpandedGroup(null); setConfirmedGroups({}); setLocResolves([]); setLocDiscModal(null)
-    setNurse(''); setNQ(''); setShift('')
+    setNurse(''); setNQ(''); setShift(''); setFridgeTemp('')
     setTimeout(() => { isResetting.current = false }, 100)
   }
 
@@ -3570,7 +3572,10 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
       const durationSec = finalActiveMs > 0 ? Math.round(finalActiveMs / 1000) : null
       const durationMin = durationSec !== null ? Math.round(durationSec / 60 * 10) / 10 : null
       await addDoc(collection(db,'checks'), {
-        nurse, shift, mode:'detailed', startTs: safeStartTs, endTs, durationSec, durationMin, ts: endTs,
+        nurse, shift,
+        fridgeTemp: fridgeTemp !== '' ? Number(fridgeTemp) : null,
+        fridgeTempOk: fridgeTemp !== '' ? (Number(fridgeTemp) >= 2 && Number(fridgeTemp) <= 8) : null,
+        mode:'detailed', startTs: safeStartTs, endTs, durationSec, durationMin, ts: endTs,
         totalDrugs, deficientCount: deficientItems.length, deficientDrugs: deficientItems,
         deficiencyRate: Math.round(deficientItems.length / totalDrugs * 1000) / 10,
         discrepancyCount: discrepancyItems.length, discrepancyItems, totalDiscrepancyUnits,
@@ -3824,8 +3829,8 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
           <div style={{fontWeight:500,fontSize:13}}>{nurse}</div>
           <div style={{fontSize:11,color:'#5F7A6A'}}>เวร{shift} · แก้ไข {changed} รายการ · ยืนยันแล้ว {totalConfirmed}/{totalGroups} location</div>
         </div>
-        <button className="btn primary sm" onClick={handleSubmitCount} disabled={saving||!allConfirmed}
-          style={{opacity:allConfirmed?1:0.5}}>
+        <button className="btn primary sm" onClick={handleSubmitCount} disabled={saving||!allConfirmed||fridgeTemp===''}
+          style={{opacity:(allConfirmed&&fridgeTemp!=='')?1:0.5}}>
           {saving?'กำลังบันทึก...':'ตรวจสอบและบันทึก'}
         </button>
       </div>
@@ -3834,6 +3839,48 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
       <div style={{height:6,background:'#E0EAE5',borderRadius:3,marginBottom:10,overflow:'hidden'}}>
         <div style={{height:'100%',width:`${Math.round(totalConfirmed/Math.max(totalGroups,1)*100)}%`,background:'#0F6E56',borderRadius:3,transition:'width .4s'}}/>
       </div>
+
+      {/* ── อุณหภูมิตู้เย็น card ── */}
+      {(() => {
+        const t = fridgeTemp !== '' ? Number(fridgeTemp) : null
+        const tooLow  = t !== null && t < 2
+        const tooHigh = t !== null && t > 8
+        const ok      = t !== null && !tooLow && !tooHigh
+        const missing = fridgeTemp === ''
+        return (
+          <div style={{
+            borderRadius:10, padding:'10px 14px', marginBottom:8,
+            display:'flex', alignItems:'center', gap:10,
+            background: missing ? '#FFF8E1' : ok ? '#E1F5EE' : '#FCEBEB',
+            border: `0.5px solid ${missing ? '#FFD54F' : ok ? '#9FE1CB' : '#F7C1C1'}`
+          }}>
+            <span style={{fontSize:20, flexShrink:0}}>🌡️</span>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12, fontWeight:600, color: missing ? '#8B6900' : ok ? '#0F6E56' : '#A32D2D', marginBottom:4}}>
+                {missing ? 'กรุณากรอกอุณหภูมิตู้เย็นก่อนยืนยัน' : ok ? `✅ อุณหภูมิ ${fridgeTemp}°C อยู่ในเกณฑ์ปกติ (2–8°C)` : tooHigh ? `⚠️ อุณหภูมิ ${fridgeTemp}°C สูงกว่าปกติ — โปรดตรวจสอบตู้เย็นทันที!` : `⚠️ อุณหภูมิ ${fridgeTemp}°C ต่ำกว่าปกติ — โปรดตรวจสอบตู้เย็นทันที!`}
+              </div>
+              <div style={{position:'relative', maxWidth:160}}>
+                <input
+                  className="inp"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.1"
+                  placeholder="เช่น 4.5"
+                  value={fridgeTemp}
+                  onChange={e => setFridgeTemp(e.target.value)}
+                  style={{
+                    paddingRight:36,
+                    background: missing ? '#fff' : ok ? '#F0FAF6' : '#FEF2F2',
+                    borderColor: missing ? '#FFD54F' : ok ? '#9FE1CB' : '#F7C1C1',
+                    fontSize:13, fontWeight:500
+                  }}
+                />
+                <span style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',fontSize:12,color:'#8BA898',pointerEvents:'none'}}>°C</span>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {!allConfirmed && <div className="info" style={{marginBottom:8}}>กรุณายืนยันครบทุก location ก่อนกดบันทึก</div>}
 
@@ -4151,8 +4198,8 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
       })()}
 
       {allConfirmed && (
-        <button className="btn primary full" onClick={handleSubmitCount} disabled={saving} style={{marginTop:8}}>
-          {saving?'กำลังบันทึก...':'✓ ตรวจสอบและบันทึกทั้งหมด'}
+        <button className="btn primary full" onClick={handleSubmitCount} disabled={saving||fridgeTemp===''} style={{marginTop:8,opacity:fridgeTemp!==''?1:0.5}}>
+          {saving?'กำลังบันทึก...':fridgeTemp===''?'กรุณากรอกอุณหภูมิตู้เย็นก่อนบันทึก':'✓ ตรวจสอบและบันทึกทั้งหมด'}
         </button>
       )}
     </>
@@ -5445,6 +5492,62 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
   const rateBg    = comp.rate >= 80 ? '#E1F5EE' : comp.rate >= 50 ? '#FAEEDA' : '#FCEBEB'
   const rateBd    = comp.rate >= 80 ? '#9FE1CB' : comp.rate >= 50 ? '#FAC775' : '#F7C1C1'
 
+  const exportFridgeTemp = () => {
+    const [fy, fm] = logMonth.split('-').map(Number)
+    const mLabel = new Date(fy, fm-1, 1).toLocaleDateString('th-TH', { month:'long', year:'numeric' })
+    // กรองเฉพาะ checks เดือนที่เลือก และมีข้อมูลอุณหภูมิ
+    const monthChecks = checks
+      .filter(c => {
+        const ts = c.ts?.toDate ? c.ts.toDate() : new Date(c.ts)
+        return ts.getFullYear() === fy && ts.getMonth()+1 === fm && c.fridgeTemp != null
+      })
+      .sort((a,b) => {
+        const ta = a.ts?.toDate ? a.ts.toDate() : new Date(a.ts)
+        const tb = b.ts?.toDate ? b.ts.toDate() : new Date(b.ts)
+        return ta - tb
+      })
+
+    let csv = `Bangkok Hospital Chanthaburi : ICU-B\r\n`
+    csv += `=== บันทึกอุณหภูมิตู้เย็นยา : ${mLabel} ===\r\n`
+    csv += `เกณฑ์ปกติ: 2–8 องศาเซลเซียส\r\n\r\n`
+
+    if (!monthChecks.length) {
+      csv += `ไม่มีข้อมูลอุณหภูมิในเดือนนี้\r\n`
+      exportCSV(`FridgeTemp_${logMonth}`, csv)
+      return
+    }
+
+    csv += `วันที่,เวร,พยาบาล,อุณหภูมิ (°C),สถานะ\r\n`
+    monthChecks.forEach(c => {
+      const ts = c.ts?.toDate ? c.ts.toDate() : new Date(c.ts)
+      const dateStr = ts.toLocaleDateString('th-TH', {
+        day:'2-digit', month:'2-digit', year:'2-digit',
+        hour:'2-digit', minute:'2-digit'
+      })
+      const status = c.fridgeTempOk === false
+        ? (c.fridgeTemp > 8 ? '⚠️ สูงกว่าปกติ' : '⚠️ ต่ำกว่าปกติ')
+        : '✅ ปกติ'
+      csv += `"${dateStr}","${c.shift||''}","${c.nurse||''}",${c.fridgeTemp},"${status}"\r\n`
+    })
+
+    // สรุปท้าย
+    const temps = monthChecks.map(c => c.fridgeTemp)
+    const avg   = Math.round(temps.reduce((s,t)=>s+t,0)/temps.length * 10) / 10
+    const minT  = Math.min(...temps)
+    const maxT  = Math.max(...temps)
+    const outCount = monthChecks.filter(c => c.fridgeTempOk === false).length
+
+    csv += `\r\n=== สรุปประจำเดือน ===\r\n`
+    csv += `จำนวนครั้งที่บันทึก,${monthChecks.length} ครั้ง\r\n`
+    csv += `อุณหภูมิเฉลี่ย,${avg} °C\r\n`
+    csv += `ต่ำสุด,${minT} °C\r\n`
+    csv += `สูงสุด,${maxT} °C\r\n`
+    csv += `ครั้งที่นอกเกณฑ์ (< 2 หรือ > 8°C),${outCount} ครั้ง\r\n`
+    csv += `อัตรานอกเกณฑ์,${monthChecks.length>0?Math.round(outCount/monthChecks.length*1000)/10:0}%\r\n`
+
+    exportCSV(`FridgeTemp_${logMonth}`, csv)
+  }
+
   const exportExpirySnapshots = () => {
     if (!expirySnapshots.length) { alert('ยังไม่มีข้อมูล Snapshot (จะบันทึกอัตโนมัติเมื่อเปิดแอปในต้นเดือนถัดไป)'); return }
     let csv = `Bangkok Hospital Chanthaburi : ICU-B\r\n`
@@ -5478,6 +5581,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
     { label: 'ประวัติเช็คยารายวัน (CSV)',    desc: 'ตามเดือนที่เลือกด้านบน',               fn: exportMonthLog },
     { label: 'จำนวนยาต่อ session (Matrix)',   desc: 'ยา × session — ทุกครั้งที่นับ',         fn: exportDrugCountMatrix },
     { label: 'Expiry Snapshot รายเดือน',      desc: 'ยาหมดอายุ/เกินเวลาแลก — บันทึกอัตโนมัติทุกต้นเดือน', fn: exportExpirySnapshots },
+    { label: '🌡️ อุณหภูมิตู้เย็น (รายเดือน)', desc: 'บันทึกอุณหภูมิตู้เย็นแต่ละเวร ตามเดือนที่เลือก',      fn: exportFridgeTemp },
   ]
 
   return (
