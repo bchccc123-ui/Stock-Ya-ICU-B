@@ -1621,6 +1621,9 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
       // Group items by drugId for PutawayOverlay
       const drugGroups = {}
       
+      // Track lots after FEFO deduction (for Emergency only)
+      const lotsAfterFEFO = {}
+      
       for (const item of validItems) {
         const drug = dl.find(d => d.id == item.drugId)
         if (!drug) continue
@@ -1636,13 +1639,23 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
         if (pending.source !== 'missing_tracked') {
           const drugLots = lots.filter(l => l.drugId == item.drugId && l.qty > 0)
             .sort((a,b) => new Date(a.expiry) - new Date(b.expiry))
+          
+          // Simulate FEFO deduction locally
+          let remainingLots = drugLots.map(l => ({ ...l })) // clone
           let rem = item.qty
-          for (const lot of drugLots) {
+          for (const lot of remainingLots) {
             if (rem <= 0) break
             const take = Math.min(lot.qty, rem)
             await updateDoc(doc(db, 'lots', lot.docId), { qty: lot.qty - take })
+            lot.qty -= take
             rem -= take
           }
+          
+          // Store lots after deduction (filter out qty=0)
+          lotsAfterFEFO[drug.id] = remainingLots.filter(l => l.qty > 0)
+        } else {
+          // Missing: ไม่ต้องตัด FEFO (ตัดไปแล้วตอน Stock Count)
+          lotsAfterFEFO[drug.id] = lots.filter(l => l.drugId == item.drugId && l.qty > 0)
         }
 
         // 2. Add new lot
@@ -1699,7 +1712,7 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
         
         // Group lots by drugId for overlay
         if (!drugGroups[drug.id]) {
-          drugGroups[drug.id] = { drug, lots: [] }
+          drugGroups[drug.id] = { drug, lots: [], lotsAfterFEFO: lotsAfterFEFO[drug.id] || [] }
         }
         drugGroups[drug.id].lots.push({ expiry: newExpiry, qty: item.qty })
       }
@@ -1714,13 +1727,33 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
         })
       }
 
+      // Helper: คำนวณ pa ด้วย lots หลังตัด FEFO
+      const calcPutawayWithLots = (drugId, expiry, existingLots) => {
+        const drug = dl.find(d => d.id == drugId)
+        if (!drug) return null
+        
+        const dir = drug.direction || 'ltr'
+        const sorted = [...existingLots, { expiry, isNew: true }]
+          .sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
+        
+        const total = sorted.length
+        const newIndex = sorted.findIndex(l => l.isNew)
+        const position = newIndex + 1
+        
+        return {
+          direction: dir,
+          position,
+          existingLots: existingLots
+        }
+      }
+
       // 5. Show PutawayOverlay
       const drugIds = Object.keys(drugGroups)
       
       if (isMissing || drugIds.length === 1) {
         // Missing หรือ Emergency ยาเดียว → แสดงแบบเดิม
         const drugId = drugIds[0]
-        const { drug, lots: returnLots } = drugGroups[drugId]
+        const { drug, lots: returnLots, lotsAfterFEFO: existingLots } = drugGroups[drugId]
         
         if (drug?.singleStock) {
           const group = STORAGE_GROUPS.find(g => g.id === drug.groupId)
@@ -1735,7 +1768,7 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
           })
         } else {
           const sortedLots = returnLots.sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
-          const pa = calcPutaway(drug.id, sortedLots[0].expiry)
+          const pa = calcPutawayWithLots(drug.id, sortedLots[0].expiry, existingLots)
           
           if (sortedLots.length === 1) {
             setPutaway({
@@ -1757,7 +1790,7 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
       } else {
         // Emergency หลายยา → แสดงแบบ multi-drug
         const allDrugs = drugIds.map(drugId => {
-          const { drug, lots } = drugGroups[drugId]
+          const { drug, lots, lotsAfterFEFO: existingLots } = drugGroups[drugId]
           const sortedLots = lots.sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
           
           if (drug?.singleStock) {
@@ -1776,7 +1809,7 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
               returnLots: sortedLots.length > 1 ? sortedLots : null,
               qty: sortedLots.length === 1 ? sortedLots[0].qty : null,
               expiry: sortedLots[0].expiry,
-              pa: calcPutaway(drug.id, sortedLots[0].expiry)
+              pa: calcPutawayWithLots(drug.id, sortedLots[0].expiry, existingLots)
             }
           }
         })
