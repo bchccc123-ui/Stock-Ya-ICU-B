@@ -358,7 +358,108 @@ function ExpPicker({ drug, expM, expY, fullDate, onExpM, onExpY, onFullDate, all
 }
 
 /* ═══ PUTAWAY OVERLAY ═══ */
-function PutawayOverlay({ drug, qty, expiry, returnLots, pa, fefoExp, context, singleStock, groupName, groupIcon, onDone }) {
+function PutawayOverlay({ drug, drugs, qty, expiry, returnLots, pa, fefoExp, context, singleStock, groupName, groupIcon, onDone }) {
+  // ── Multi-Drug Mode (Emergency หลายยา) ──
+  if (drugs && drugs.length > 1) {
+    return (
+      <div className="overlay" style={{ background:'#0F4A38', alignItems:'stretch', justifyContent:'flex-start', padding:16, overflowY:'auto', gap:0 }}>
+        <div style={{ fontSize:17, fontWeight:800, color:'#fff', marginBottom:4 }}>
+          {context === 'return' ? 'คืนยา' : 'รับเข้า'} {drugs.length} รายการ
+        </div>
+        <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:16 }}>
+          ตรวจสอบตำแหน่งวางของแต่ละยา
+        </div>
+        
+        {/* Drug List */}
+        <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:16 }}>
+          {drugs.map((item, idx) => {
+            const itemDrug = item.drug
+            const isSingle = item.singleStock
+            
+            return (
+              <div key={idx} style={{ background:'rgba(0,0,0,0.25)', borderRadius:12, padding:12, border:'1px solid rgba(255,255,255,0.1)' }}>
+                {/* Header */}
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <div style={{ fontSize:15, fontWeight:700, color:'#fff', background:'rgba(255,255,255,0.1)', width:26, height:26, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12 }}>
+                      {idx + 1}
+                    </div>
+                    <div>
+                      <div style={{ fontSize:14, fontWeight:600, color:'#fff' }}>{itemDrug.name}</div>
+                      <div style={{ fontSize:10, color:'rgba(255,255,255,0.5)' }}>
+                        EXP {fmtMY(item.expiry)} · {item.qty || item.returnLots?.reduce((s,l)=>s+l.qty,0) || 1} {itemDrug.unit} · {isSingle ? 'ทิม' : 'คืน'}
+                      </div>
+                    </div>
+                  </div>
+                  {isSingle && (
+                    <div style={{ fontSize:10, padding:'3px 8px', borderRadius:12, background:'rgba(245,166,35,0.2)', color:'#F5A623', fontWeight:600 }}>
+                      Single stock
+                    </div>
+                  )}
+                </div>
+                
+                {/* Position Info */}
+                {isSingle ? (
+                  // Single Stock: แสดง slot
+                  <div style={{ background:'rgba(245,166,35,0.1)', border:'1px solid rgba(245,166,35,0.3)', borderRadius:8, padding:8 }}>
+                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:4 }}>📦 Slot {item.groupName || item.groupIcon}</div>
+                    <div style={{ fontSize:12, color:'#F5A623', fontWeight:600 }}>
+                      Single stock - วางตรงนี้แล้วนำของเดิมออก FEFO
+                    </div>
+                  </div>
+                ) : (
+                  // Multi-lot: แสดง timeline
+                  <div style={{ background:'rgba(93,219,167,0.08)', border:'1px solid rgba(93,219,167,0.2)', borderRadius:8, padding:8 }}>
+                    {item.returnLots && item.returnLots.length > 1 ? (
+                      <>
+                        <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:6 }}>
+                          รายละเอียด {item.returnLots.length} รายการ
+                        </div>
+                        <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+                          {item.returnLots.map((lot, lotIdx) => (
+                            <div key={lotIdx} style={{ fontSize:10, padding:'4px 8px', borderRadius:6, background:'rgba(93,219,167,0.15)', border:'1px solid rgba(93,219,167,0.3)', color:'#5DDBA7', fontWeight:600 }}>
+                              {fmtMY(lot.expiry)}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:4 }}>
+                          รายละเอียด 1 ({item.pa ? 'พร้อมส่ง' : 'พร้อมส่ง'})
+                        </div>
+                        <div style={{ fontSize:10, padding:'4px 8px', display:'inline-block', borderRadius:6, background:'rgba(93,219,167,0.15)', border:'1px solid rgba(93,219,167,0.3)', color:'#5DDBA7', fontWeight:600 }}>
+                          EXP {fmtMY(item.expiry)}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        
+        {/* Status badges */}
+        <div style={{ display:'flex', gap:6, marginBottom:16, flexWrap:'wrap', justifyContent:'center' }}>
+          <div style={{ fontSize:10, padding:'4px 10px', borderRadius:12, background:'rgba(93,219,167,0.15)', color:'#5DDBA7', border:'1px solid rgba(93,219,167,0.3)' }}>
+            ✓ รายชอย
+          </div>
+          <div style={{ fontSize:10, padding:'4px 10px', borderRadius:12, background:'rgba(93,219,167,0.15)', color:'#5DDBA7', border:'1px solid rgba(93,219,167,0.3)' }}>
+            ✓ คืนตรอง
+          </div>
+          <div style={{ fontSize:10, padding:'4px 10px', borderRadius:12, background:'rgba(93,219,167,0.15)', color:'#5DDBA7', border:'1px solid rgba(93,219,167,0.3)' }}>
+            ✓ ปะผัง
+          </div>
+        </div>
+        
+        <button onClick={onDone} style={{ background:'#5DDBA7', border:'none', borderRadius:12, padding:13, color:'#050D0A', fontFamily:'inherit', fontSize:14, fontWeight:800, cursor:'pointer', width:'100%' }}>
+          ✓ ขันมีรายแลว
+        </button>
+      </div>
+    )
+  }
+  
   // ── Single-Stock: overlay แบบง่าย "วางแทนของเดิม" ──
   if (singleStock) {
     return (
@@ -883,7 +984,7 @@ export default function App() {
           <div className="bar-row">
             <div>
               <div className="bar-title">💊 Term-Ya Application</div>
-              <div className="bar-sub">Bangkok Hospital Chanthaburi : ICU-A</div>
+              <div className="bar-sub">Bangkok Hospital Chanthaburi : ICU-B</div>
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
               <button onClick={() => setGlobalScanOpen(true)}
@@ -1591,11 +1692,13 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
         })
       }
 
-      // 5. Show PutawayOverlay แทน success screen
-      // ถ้ามีหลายยา แสดงแค่ยาแรก (หรือแยกแสดงทีละยาก็ได้)
-      const firstDrugId = Object.keys(drugGroups)[0]
-      if (firstDrugId) {
-        const { drug, lots: returnLots } = drugGroups[firstDrugId]
+      // 5. Show PutawayOverlay
+      const drugIds = Object.keys(drugGroups)
+      
+      if (isMissing || drugIds.length === 1) {
+        // Missing หรือ Emergency ยาเดียว → แสดงแบบเดิม
+        const drugId = drugIds[0]
+        const { drug, lots: returnLots } = drugGroups[drugId]
         
         if (drug?.singleStock) {
           const group = STORAGE_GROUPS.find(g => g.id === drug.groupId)
@@ -1609,7 +1712,6 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
             groupIcon: group?.icon || '📦'
           })
         } else {
-          // Multi-lot or single lot
           const sortedLots = returnLots.sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
           const pa = calcPutaway(drug.id, sortedLots[0].expiry)
           
@@ -1630,6 +1732,37 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
             })
           }
         }
+      } else {
+        // Emergency หลายยา → แสดงแบบ multi-drug
+        const allDrugs = drugIds.map(drugId => {
+          const { drug, lots } = drugGroups[drugId]
+          const sortedLots = lots.sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
+          
+          if (drug?.singleStock) {
+            const group = STORAGE_GROUPS.find(g => g.id === drug.groupId)
+            return {
+              drug,
+              qty: sortedLots[0].qty,
+              expiry: sortedLots[0].expiry,
+              singleStock: true,
+              groupName: group?.name || '',
+              groupIcon: group?.icon || '📦'
+            }
+          } else {
+            return {
+              drug,
+              returnLots: sortedLots.length > 1 ? sortedLots : null,
+              qty: sortedLots.length === 1 ? sortedLots[0].qty : null,
+              expiry: sortedLots[0].expiry,
+              pa: calcPutaway(drug.id, sortedLots[0].expiry)
+            }
+          }
+        })
+        
+        setPutaway({
+          drugs: allDrugs,  // ← ส่ง array
+          context: 'return'
+        })
       }
       
       // Close modal
@@ -3703,7 +3836,7 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
                 const sortedLots=[...rx.lots].sort((a,b)=>new Date(a.expiry)-new Date(b.expiry))
                 let rem=rx.systemTotal-rx.counted
                 for(const l of sortedLots){if(rem<=0)break;const cut=Math.min(l.qty,rem);await updateDoc(doc(db,'lots',l.docId),{qty:l.qty-cut});rem-=cut}
-                const pRef=await addDoc(collection(db,'pending_syncs'),{bed_id:rx.missingBed,nurse,drug_id:rx.drug.id,drug_name:rx.drug.name,qty:rx.systemTotal-rx.counted,timestamp:Timestamp.now(),source:'missing_tracked',status:'pending',created_at:Timestamp.now(),completed_at:null,completed_by:null,reconciled_withdrawal_id:null})
+                const pRef=await addDoc(collection(db,'pending_syncs'),{bed_id:rx.missingBed,nurse,drug_id:rx.drug.id,drug_name:rx.drug.name,qty:rx.systemTotal-rx.counted,timestamp:startTs||Timestamp.now(),source:'missing_tracked',status:'pending',created_at:Timestamp.now(),completed_at:null,completed_by:null,reconciled_withdrawal_id:null})
                 const bedValLoc=rx.missingBed==='other'?`อื่นๆ: ${rx.missingNote||''}`:rx.missingBed
                 await addDoc(collection(db,'withdrawals'),{nurse,drugId:rx.drug.id,drugName:rx.drug.name,bed:bedValLoc,qty:rx.systemTotal-rx.counted,note:rx.missingBed==='other'?`(Stock Count — Missing Tracked: ${rx.missingNote||''})`:'(Stock Count — Missing Tracked)',returned:false,retExp:'',ts:Timestamp.now(),usage_type:'Missing_Tracked',pending_sync_id:pRef.id,reconciliation_time_minutes:null})
               } catch(e){console.error('Missing_Tracked save error:',e)}
@@ -4722,7 +4855,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
     const c = calcCompliance(reportDays)
     let csv = `=== รายงานอัตราการเช็คสต็อกยา ===\r\n`
     csv += `ช่วงเวลา: ${reportDays} วันย้อนหลัง\r\n`
-    csv += `Bangkok Hospital Chanthaburi : ICU-A\r\n\r\n`
+    csv += `Bangkok Hospital Chanthaburi : ICU-B\r\n\r\n`
     csv += `สรุป:\r\n`
     csv += `เป้าหมาย,${c.expected} ครั้ง (${c.days} วัน × 2 เวร)\r\n`
     csv += `เช็คจริง,${c.actual} ครั้ง\r\n`
@@ -4775,7 +4908,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
     filtered.forEach(w => { drugUsage[w.drugName] = (drugUsage[w.drugName]||0) + w.qty })
     const topDrugs = Object.entries(drugUsage).sort((a,b)=>b[1]-a[1]).slice(0,5)
 
-    let csv = `Bangkok Hospital Chanthaburi : ICU-A\r\n`
+    let csv = `Bangkok Hospital Chanthaburi : ICU-B\r\n`
     csv += `=== ประวัติการใช้ยา/Return : ${mLabel} ===\r\n\r\n`
     csv += `=== สรุปทั่วไป ===\r\n`
     csv += `จำนวนครั้งใช้ยาทั้งหมด,${totalUses}\r\n`
@@ -4950,7 +5083,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
       return ts.getFullYear() === ry && ts.getMonth()+1 === rm
     })
     const snapNote = snap ? `(Snapshot: ${snap.monthKey})` : '(ไม่มี Snapshot — ใช้ข้อมูล ณ ปัจจุบัน)'
-    let csv = `=== Term-Ya Monthly Report ===\r\n${mLabel}  ${snapNote}\r\nBangkok Hospital Chanthaburi : ICU-A\r\n\r\n`
+    let csv = `=== Term-Ya Monthly Report ===\r\n${mLabel}  ${snapNote}\r\nBangkok Hospital Chanthaburi : ICU-B\r\n\r\n`
     // ── ส่วนสต็อก ──
     csv += 'ชื่อยา,สต็อก,par,FEFO EXP,สถานะ\r\n'
     if (snap?.allDrugStocks?.length) {
@@ -5079,7 +5212,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
       .find(c=>c.totalDrugs)?.totalDrugs || 0
 
     // ── Section 1: Monthly Summary ──
-    let csv = `Bangkok Hospital Chanthaburi : ICU-A\r\n`
+    let csv = `Bangkok Hospital Chanthaburi : ICU-B\r\n`
     csv += `=== รายงานประจำเดือน : ${mName} ===\r\n\r\n`
     csv += `=== สรุปรายเดือน ===\r\n`
     csv += `เดือน,Compliance Rate (%),เช็คจริง,เป้าหมาย,`
@@ -5159,7 +5292,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
 
   const exportExpirySnapshots = () => {
     if (!expirySnapshots.length) { alert('ยังไม่มีข้อมูล Snapshot (จะบันทึกอัตโนมัติเมื่อเปิดแอปในต้นเดือนถัดไป)'); return }
-    let csv = `Bangkok Hospital Chanthaburi : ICU-A\r\n`
+    let csv = `Bangkok Hospital Chanthaburi : ICU-B\r\n`
     csv += `=== Expiry Snapshot รายเดือน ===\r\n\r\n`
     csv += `=== สรุปทุกเดือน ===\r\n`
     csv += `เดือน,หมดอายุ (lot),เกินเวลาแลก (lot),ถึงเวลาแลก (lot)\r\n`
