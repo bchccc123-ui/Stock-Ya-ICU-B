@@ -763,7 +763,7 @@ function PutawayOverlay({ drug, drugs, qty, expiry, returnLots, pa, fefoExp, con
           </>
         )}
         <div style={{ textAlign:'center', fontSize:10, color:'rgba(255,255,255,0.3)', marginTop:7, paddingTop:7, borderTop:'1px solid rgba(255,255,255,0.07)' }}>
-          📋 เรียงตาม EXP — {total} lot รวม
+          📋 เรียงตาม EXP — {total} lots ทั้งหมด (เติมใหม่ {totalRetQty} {drug.unit})
         </div>
       </div>
 
@@ -1503,7 +1503,7 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
   const removeCartItem = (id) => setCart(prev => prev.filter(c => c.id !== id))
   
   // Calculate FEFO Preview - รวม multiple lots ที่เติมพร้อมกัน
-  const calculateFEFOWithReturns = (drugId, expiry, qtyToReplace = 0, isMissing = false, otherReturnedLots = []) => {
+  const calculateFEFOWithReturns = (drugId, expiry, qtyToReplace = 0, isMissing = false, otherReturnedLots = [], otherReturnedQtys = []) => {
     if (!drugId || !expiry) return null
     
     let existingLots = lots
@@ -1513,7 +1513,9 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
     // ถ้าไม่ใช่ Missing → ต้องหัก qty ที่จะถูกตัดออก (FEFO) ก่อน
     if (!isMissing && qtyToReplace > 0) {
       existingLots = existingLots.map(l => ({ ...l })) // clone
-      let remaining = qtyToReplace
+      // ✓ FIX: หัก FEFO รวมทั้ง qty ของรายการอื่นด้วย
+      const totalQtyToReplace = qtyToReplace + otherReturnedQtys.reduce((sum, q) => sum + q, 0)
+      let remaining = totalQtyToReplace
       for (let i = 0; i < existingLots.length && remaining > 0; i++) {
         const take = Math.min(existingLots[i].qty, remaining)
         existingLots[i].qty -= take
@@ -1637,19 +1639,23 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
           return { ...item, fefoPreview: null }
         }
         
-        // หา expiry ของ lots อื่นที่เติมพร้อมกัน
-        const otherReturnedLots = updated
+        // หา expiry และ qty ของ lots อื่นที่เติมพร้อมกัน
+        const otherReturnedData = updated
           .filter(c => c.id !== item.id && c.drugId == item.drugId)
           .map(c => {
+            let exp = null
             if (drug?.fullDateExp && c.fullDate) {
-              return c.fullDate
+              exp = c.fullDate
             } else if (!drug?.fullDateExp && c.expM && c.expY) {
               const lastDay = new Date(+c.expY, +c.expM, 0).getDate()
-              return `${c.expY}-${String(c.expM).padStart(2,'0')}-${lastDay}`
+              exp = `${c.expY}-${String(c.expM).padStart(2,'0')}-${lastDay}`
             }
-            return null
+            return { expiry: exp, qty: c.qty || 1 }
           })
-          .filter(Boolean)
+          .filter(d => d.expiry !== null)
+        
+        const otherReturnedLots = otherReturnedData.map(d => d.expiry)
+        const otherReturnedQtys = otherReturnedData.map(d => d.qty)
         
         // คำนวณ FEFO รวมกับ lots อื่น
         return {
@@ -1659,7 +1665,8 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
             expiry, 
             item.qty || 0, 
             isMissing,
-            otherReturnedLots
+            otherReturnedLots,
+            otherReturnedQtys
           )
         }
       })
@@ -1682,6 +1689,9 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
       // Track lots after FEFO deduction (for Emergency only)
       const lotsAfterFEFO = {}
       
+      // ✓ FIX: Track cumulative FEFO deductions for same drug
+      const cumulativeLotsAfterFEFO = {}
+      
       for (const item of validItems) {
         const drug = dl.find(d => d.id == item.drugId)
         if (!drug) continue
@@ -1695,8 +1705,11 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
 
         // 1. Deduct old stock FEFO (ถ้าเป็น Emergency เท่านั้น - Missing ตัดไปแล้วตอน Stock Count)
         if (pending.source !== 'missing_tracked') {
-          const drugLots = lots.filter(l => l.drugId == item.drugId && l.qty > 0)
-            .sort((a,b) => new Date(a.expiry) - new Date(b.expiry))
+          // ✓ FIX: ใช้ lots ที่ตัดไปแล้ว (cumulative) ถ้ามี ไม่งั้นใช้ lots จาก state
+          const drugLots = (cumulativeLotsAfterFEFO[drug.id] 
+            ? cumulativeLotsAfterFEFO[drug.id] 
+            : lots.filter(l => l.drugId == item.drugId && l.qty > 0)
+          ).sort((a,b) => new Date(a.expiry) - new Date(b.expiry))
           
           // Simulate FEFO deduction locally
           let remainingLots = drugLots.map(l => ({ ...l })) // clone
@@ -1710,7 +1723,10 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
           }
           
           // Store lots after deduction (filter out qty=0)
-          lotsAfterFEFO[drug.id] = remainingLots.filter(l => l.qty > 0)
+          const updatedLots = remainingLots.filter(l => l.qty > 0)
+          lotsAfterFEFO[drug.id] = updatedLots
+          // ✓ FIX: อัพเดต cumulative tracking
+          cumulativeLotsAfterFEFO[drug.id] = updatedLots
         } else {
           // Missing: ไม่ต้องตัด FEFO (ตัดไปแล้วตอน Stock Count)
           lotsAfterFEFO[drug.id] = lots.filter(l => l.drugId == item.drugId && l.qty > 0)
@@ -1770,7 +1786,10 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
         
         // Group lots by drugId for overlay
         if (!drugGroups[drug.id]) {
-          drugGroups[drug.id] = { drug, lots: [], lotsAfterFEFO: lotsAfterFEFO[drug.id] || [] }
+          drugGroups[drug.id] = { drug, lots: [], lotsAfterFEFO: cumulativeLotsAfterFEFO[drug.id] || lotsAfterFEFO[drug.id] || [] }
+        } else {
+          // ✓ FIX: Update lotsAfterFEFO ทุกรอบเพื่อให้ได้ค่าล่าสุด
+          drugGroups[drug.id].lotsAfterFEFO = cumulativeLotsAfterFEFO[drug.id] || lotsAfterFEFO[drug.id] || []
         }
         drugGroups[drug.id].lots.push({ expiry: newExpiry, qty: item.qty })
       }
@@ -1793,9 +1812,15 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
         // ใช้ getDrugDir() เหมือน calculateFEFOWithReturns
         const dir = getDrugDir(drugId)
         
+        // ✓ FIX: Format existingLots ให้มี 'exp' field สำหรับ PutawayOverlay
+        const formattedExistingLots = existingLots.map(l => ({
+          exp: fmtMY(l.expiry),
+          expiry: l.expiry
+        }))
+        
         // คำนวณ position โดยใช้ Par (จำนวนชิ้นที่ควรมี)
         // แทนการนับ lots
-        const sorted = [...existingLots, { expiry, isNew: true }]
+        const sorted = [...formattedExistingLots, { expiry, isNew: true }]
           .sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
         
         const newIndex = sorted.findIndex(l => l.isNew)
@@ -1804,7 +1829,7 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
         return {
           direction: dir,
           position,
-          existingLots: existingLots,
+          existingLots: formattedExistingLots,  // ✓ ส่ง formatted version
           par: drug.par  // ← เพิ่ม par เพื่อให้ overlay ใช้
         }
       }
