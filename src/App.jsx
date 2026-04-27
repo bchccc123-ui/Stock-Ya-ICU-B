@@ -4058,24 +4058,37 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
                   </>
                 ) : (
                   <>
-                    <div style={{fontSize:11,fontWeight:500,color:'#3C3489',marginBottom:6}}>EXP ที่มีอยู่ใน stock แล้ว ({r.lots.length} lot):</div>
-                    <div style={{background:'#F4F3FE',borderRadius:8,padding:'8px 12px',marginBottom:10,border:'0.5px solid #CECBF6'}}>
+                    {/* ⚠️ กล่องเตือน - ยาเกินต้องใส่ EXP ที่ต่างจากที่มีอยู่ */}
+                    <div style={{background:'#FFF4E5',border:'1.5px solid #F9A825',borderRadius:8,padding:'10px 12px',marginBottom:12}}>
+                      <div style={{fontSize:13,fontWeight:600,color:'#E65100',marginBottom:4}}>
+                        ⚠️ ยาที่นับได้เกิน {r.counted-r.systemTotal} {r.drug.unit}
+                      </div>
+                      <div style={{fontSize:12,color:'#854F0B'}}>
+                        EXP ของยาที่เกิน <b>ต้องต่างจาก EXP ที่มีอยู่ด้านล่าง</b>
+                      </div>
+                    </div>
+
+                    {/* แสดง EXP ที่มีอยู่แล้ว */}
+                    <div style={{fontSize:12,fontWeight:600,color:'#3C3489',marginBottom:8}}>
+                      📦 EXP ที่มีอยู่ใน stock ({r.lots.length} lot):
+                    </div>
+                    <div style={{background:'#F4F3FE',borderRadius:8,padding:'10px 12px',marginBottom:14,border:'1.5px solid #9E95D9'}}>
                       {r.lots.length===0
-                        ? <div style={{fontSize:11,color:'#8BA898'}}>ยังไม่มี lot ในระบบ</div>
+                        ? <div style={{fontSize:12,color:'#8BA898'}}>ยังไม่มี lot ในระบบ</div>
                         : r.lots.map((l,i) => (
-                          <div key={l.docId} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0',borderBottom:i<r.lots.length-1?'0.5px solid #CECBF6':'none'}}>
-                            <span style={{fontSize:11,color:'#5F7A6A'}}>lot {i+1} · {l.qty} {r.drug.unit}</span>
-                            <div style={{display:'flex',alignItems:'center',gap:4}}>
-                              {i===0&&<span style={{background:'#E1F5EE',color:'#0F6E56',fontSize:9,padding:'1px 5px',borderRadius:3}}>FEFO</span>}
-                              <span style={{fontSize:11,fontWeight:500,color:'#3C3489'}}>EXP {fmtMY(l.expiry)}</span>
+                          <div key={l.docId} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:i<r.lots.length-1?'0.5px solid #CECBF6':'none'}}>
+                            <span style={{fontSize:12,color:'#5F7A6A',fontWeight:500}}>lot {i+1} · {l.qty} {r.drug.unit}</span>
+                            <div style={{display:'flex',alignItems:'center',gap:6}}>
+                              {i===0&&<span style={{background:'#E1F5EE',color:'#0F6E56',fontSize:10,padding:'2px 6px',borderRadius:3,fontWeight:600}}>FEFO</span>}
+                              <span style={{fontSize:13,fontWeight:700,color:'#3C3489'}}>EXP {fmtMY(l.expiry)}</span>
                             </div>
                           </div>
                         ))}
-                      <div style={{fontSize:10,color:'#8BA898',marginTop:6,paddingTop:6,borderTop:'0.5px solid #CECBF6'}}>
-                        ยาที่เกินมา {r.counted-r.systemTotal} {r.drug.unit} — ควรมี EXP ต่างจากที่มีอยู่
-                      </div>
                     </div>
-                    <div style={{fontSize:11,fontWeight:500,color:'#3C3489',marginBottom:8}}>ระบุ EXP ของยาที่นับเพิ่มได้ {r.counted-r.systemTotal} {r.drug.unit}:</div>
+                    
+                    <div style={{fontSize:12,fontWeight:600,color:'#E65100',marginBottom:8}}>
+                      ➕ ระบุ EXP ใหม่ของยาที่เกิน {r.counted-r.systemTotal} {r.drug.unit}:
+                    </div>
                     <div className="g2">
                       <div>
                         <div className="lbl" style={{color:'#3C3489'}}>เดือน EXP</div>
