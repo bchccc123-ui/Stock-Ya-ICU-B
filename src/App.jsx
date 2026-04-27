@@ -375,28 +375,43 @@ function PutawayOverlay({ drug, drugs, qty, expiry, returnLots, pa, fefoExp, con
           {drugs.map((item, idx) => {
             const itemDrug = item.drug
             const isSingle = item.singleStock
+            const numReturningLots = item.returnLots?.length || 1
             
-            // คำนวณตำแหน่งสำหรับยาธรรมดา
-            let positionText = ''
+            // คำนวณข้อความตำแหน่ง
+            let positionLabel = ''
             if (!isSingle && item.pa) {
               const dir = item.pa.direction || 'ltr'
-              const position = item.pa.position || 1
-              const total = (item.pa.existingLots?.length || 0) + 1
+              const pos = item.pa.position || 1
+              const par = item.pa.par || (item.pa.existingLots?.length || 0) + 1
               
               if (dir === 'rtl') {
-                if (position === 1) positionText = 'ขวาสุด'
-                else if (position === total) positionText = 'ซ้ายสุด'
-                else positionText = `ที่ ${position} นับจากขวา`
+                // RTL: ขวา = EXP ก่อน
+                if (pos === 1) {
+                  positionLabel = 'วางช่อง 1 (ขวาสุด)'
+                } else if (pos === par) {
+                  positionLabel = `วางช่อง ${pos} (ซ้ายสุด)`
+                } else {
+                  positionLabel = `วางช่องที่ ${pos} จากขวา`
+                }
               } else if (dir === 'fb') {
-                if (position === 1) positionText = 'หน้าสุด'
-                else if (position === total) positionText = 'หลังสุด'
-                else positionText = `ที่ ${position} นับจากหน้า`
+                // FB: หน้า = EXP ก่อน
+                if (pos === 1) {
+                  positionLabel = 'วางช่อง 1 (หน้าสุด)'
+                } else if (pos === par) {
+                  positionLabel = `วางช่อง ${pos} (หลังสุด)`
+                } else {
+                  positionLabel = `วางช่องที่ ${pos} จากด้านหน้า`
+                }
               } else {
-                if (position === 1) positionText = 'ซ้ายสุด'
-                else if (position === total) positionText = 'ขวาสุด'
-                else positionText = `ที่ ${position} นับจากซ้าย`
+                // LTR: ซ้าย = EXP ก่อน
+                if (pos === 1) {
+                  positionLabel = 'วางช่อง 1 (ซ้ายสุด)'
+                } else if (pos === par) {
+                  positionLabel = `วางช่อง ${pos} (ขวาสุด)`
+                } else {
+                  positionLabel = `วางช่องที่ ${pos} จากซ้าย`
+                }
               }
-              positionText += ` (จาก ${total} ตำแหน่ง)`
             }
             
             return (
@@ -423,50 +438,93 @@ function PutawayOverlay({ drug, drugs, qty, expiry, returnLots, pa, fefoExp, con
                 
                 {/* Position Info */}
                 {isSingle ? (
-                  // Single Stock: แสดง slot
-                  <div style={{ background:'rgba(245,166,35,0.1)', border:'1px solid rgba(245,166,35,0.3)', borderRadius:8, padding:8 }}>
-                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:4 }}>📍 ตำแหน่งการวาง</div>
-                    <div style={{ fontSize:13, color:'#F5A623', fontWeight:700, marginBottom:2 }}>
-                      📦 {item.groupName || 'Slot'}
+                  // Single Stock
+                  <div style={{ background:'rgba(245,166,35,0.1)', border:'1px solid rgba(245,166,35,0.3)', borderRadius:8, padding:10 }}>
+                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:6, display:'flex', alignItems:'center', gap:4 }}>
+                      <span>📦</span>
+                      <span>Slot {item.groupName || 'M-04'}</span>
                     </div>
-                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.7)' }}>
-                      วางแทนของเดิม (Single stock)
+                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.85)' }}>
+                      Single stock - วางตรงนี้แล้วนำของเดิมออก FEFO
                     </div>
                   </div>
                 ) : (
-                  // Multi-lot: แสดง position ชัดเจน
-                  <div style={{ background:'rgba(93,219,167,0.08)', border:'1px solid rgba(93,219,167,0.2)', borderRadius:8, padding:8 }}>
-                    {item.returnLots && item.returnLots.length > 1 ? (
-                      <>
-                        <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:4 }}>
-                          📍 ตำแหน่งการวาง
-                        </div>
-                        <div style={{ fontSize:13, color:'#5DDBA7', fontWeight:700, marginBottom:4 }}>
-                          {positionText || 'ตรวจสอบ FEFO'}
-                        </div>
-                        <div style={{ fontSize:11, color:'rgba(255,255,255,0.7)', marginBottom:6 }}>
-                          คืน {item.returnLots.length} lots
+                  // Multi-lot
+                  <div style={{ background:'rgba(93,219,167,0.08)', border:'1px solid rgba(93,219,167,0.2)', borderRadius:8, padding:10 }}>
+                    {/* Position Label */}
+                    <div style={{ fontSize:12, color:'#5DDBA7', fontWeight:600, marginBottom:4 }}>
+                      {positionLabel}
+                    </div>
+                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.5)', marginBottom:8 }}>
+                      EXP ใหม่กว่าของเดิม - อยู่ตำแหน่งตรง
+                    </div>
+                    
+                    {/* Timeline */}
+                    {item.pa && (
+                      <div style={{ marginTop:8 }}>
+                        <div style={{ fontSize:9, color:'rgba(255,255,255,0.4)', marginBottom:4, display:'flex', justifyContent:'space-between' }}>
+                          {item.pa.direction === 'rtl' ? (
+                            <>
+                              <span>← ซ้าย</span>
+                              <span>ขวา (หยิบก่อน) →</span>
+                            </>
+                          ) : item.pa.direction === 'fb' ? (
+                            <>
+                              <span>← หน้า (หยิบก่อน)</span>
+                              <span>หลัง →</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>← ซ้าย (หยิบก่อน)</span>
+                              <span>ขวา →</span>
+                            </>
+                          )}
                         </div>
                         <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
-                          {item.returnLots.map((lot, lotIdx) => (
-                            <div key={lotIdx} style={{ fontSize:10, padding:'4px 8px', borderRadius:6, background:'rgba(93,219,167,0.15)', border:'1px solid rgba(93,219,167,0.3)', color:'#5DDBA7', fontWeight:600 }}>
-                              {fmtMY(lot.expiry)}
-                            </div>
-                          ))}
+                          {/* Build timeline array และ reverse สำหรับ RTL */}
+                          {(() => {
+                            const timelineItems = []
+                            
+                            // Build timeline
+                            item.pa.existingLots?.forEach((lot, lotIdx) => {
+                              const lotPosition = lotIdx + 1
+                              const isNewPosition = lotPosition === item.pa.position
+                              
+                              if (isNewPosition) {
+                                timelineItems.push(
+                                  <div key={`new-${lotIdx}`} style={{ fontSize:9, padding:'4px 6px', borderRadius:6, background:'rgba(93,219,167,0.3)', border:'1px solid rgba(93,219,167,0.5)', color:'#5DDBA7', fontWeight:700, display:'flex', alignItems:'center', gap:2 }}>
+                                    <span>📍</span>
+                                    <span>วาง</span>
+                                  </div>
+                                )
+                              }
+                              
+                              timelineItems.push(
+                                <div key={lotIdx} style={{ fontSize:9, padding:'4px 6px', borderRadius:6, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'rgba(255,255,255,0.6)' }}>
+                                  {fmtMY(lot.expiry)}
+                                </div>
+                              )
+                            })
+                            
+                            // Add "วาง" at the end if position = last
+                            if (item.pa.position === (item.pa.existingLots?.length || 0) + 1) {
+                              timelineItems.push(
+                                <div key="new-last" style={{ fontSize:9, padding:'4px 6px', borderRadius:6, background:'rgba(93,219,167,0.3)', border:'1px solid rgba(93,219,167,0.5)', color:'#5DDBA7', fontWeight:700, display:'flex', alignItems:'center', gap:2 }}>
+                                  <span>📍</span>
+                                  <span>วาง</span>
+                                </div>
+                              )
+                            }
+                            
+                            // Reverse สำหรับ RTL
+                            if (item.pa.direction === 'rtl') {
+                              return timelineItems.reverse()
+                            }
+                            
+                            return timelineItems
+                          })()}
                         </div>
-                      </>
-                    ) : (
-                      <>
-                        <div style={{ fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:4 }}>
-                          📍 ตำแหน่งการวาง
-                        </div>
-                        <div style={{ fontSize:13, color:'#5DDBA7', fontWeight:700, marginBottom:2 }}>
-                          {positionText || 'วางตาม FEFO'}
-                        </div>
-                        <div style={{ fontSize:10, padding:'4px 8px', display:'inline-block', borderRadius:6, background:'rgba(93,219,167,0.15)', border:'1px solid rgba(93,219,167,0.3)', color:'#5DDBA7', fontWeight:600 }}>
-                          EXP {fmtMY(item.expiry)}
-                        </div>
-                      </>
+                      </div>
                     )}
                   </div>
                 )}
@@ -1732,18 +1790,22 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
         const drug = dl.find(d => d.id == drugId)
         if (!drug) return null
         
-        const dir = drug.direction || 'ltr'
+        // ใช้ getDrugDir() เหมือน calculateFEFOWithReturns
+        const dir = getDrugDir(drugId)
+        
+        // คำนวณ position โดยใช้ Par (จำนวนชิ้นที่ควรมี)
+        // แทนการนับ lots
         const sorted = [...existingLots, { expiry, isNew: true }]
           .sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
         
-        const total = sorted.length
         const newIndex = sorted.findIndex(l => l.isNew)
         const position = newIndex + 1
         
         return {
           direction: dir,
           position,
-          existingLots: existingLots
+          existingLots: existingLots,
+          par: drug.par  // ← เพิ่ม par เพื่อให้ overlay ใช้
         }
       }
 
