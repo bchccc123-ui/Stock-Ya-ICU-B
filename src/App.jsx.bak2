@@ -1934,7 +1934,7 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
     <div style={{ position:'fixed', top:0, left:0, right:0, bottom:0, background:'rgba(0,0,0,0.65)', zIndex:500, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
       <div style={{ background:'#fff', borderRadius:'14px 14px 0 0', width:'100%', maxWidth:480, maxHeight:'90vh', display:'flex', flexDirection:'column' }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 16px', borderBottom:'0.5px solid #E0EAE5' }}>
-          <div style={{ fontSize:14, fontWeight:500, color:'#0F6E56' }}>{isMissing ? '✓ Return & ปิดรายการ' : '✓ Replace & ปิดรายการ'}</div>
+          <div style={{ fontSize:14, fontWeight:500, color:'#0F6E56' }}>✓ Replace & ปิดรายการ</div>
           <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', fontSize:20, color:'#8BA898' }}>✕</button>
         </div>
 
@@ -2083,7 +2083,7 @@ function ReplaceModal({ open, onClose, pending, drugsWithStock, lots, nurses, db
           <button className="btn primary full" onClick={submit}
             disabled={!nurse || cart.filter(c=>c.drugId).length===0 || saving}>
             {saving ? 'กำลังบันทึก...' : isMissing 
-              ? `✓ Return ${cart.filter(c=>c.drugId).length} lots (${cart.reduce((s,c)=>s+c.qty,0)} ชิ้น)${!closeJob?' (ค้างต่อ)':''}`
+              ? `✓ Replace ${cart.filter(c=>c.drugId).length} lots (${cart.reduce((s,c)=>s+c.qty,0)} ชิ้น)${!closeJob?' (ค้างต่อ)':''}`
               : `✓ Replace ${cart.filter(c=>c.drugId).length} รายการ${!closeJob?' (ค้างต่อ)':''}`
             }
           </button>
@@ -4032,31 +4032,14 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
         const r = mRes[mIdx]; if (!r) return null
         const mTotCut = rx => Object.values(rx.lotCuts).reduce((s,v)=>s+v,0)
         const mNeeded = rx => rx.systemTotal - rx.counted
-        const mAddValid = rx => { const tot=rx.extraLots.reduce((s,l)=>s+l.qty,0); const allExp=rx.extraLots.every(l=>l.expM!==''&&l.expY!==''); return allExp && tot===(rx.counted-rx.systemTotal) }
-        const mValid  = r.type==='cut' ? (r.missingType && r.missingType!=='' && mTotCut(r)===mNeeded(r) && (r.missingType!=='known' || (r.missingBed&&r.missingBed!==''&&(r.missingBed!=='other'||(r.missingNote||'').trim()!=='')))) : mAddValid(r)
-        const allMValid = mRes.every(rx => rx.type==='cut' ? (rx.missingType && rx.missingType!=='' && mTotCut(rx)===mNeeded(rx) && (rx.missingType!=='known' || (rx.missingBed&&rx.missingBed!==''&&(rx.missingBed!=='other'||(rx.missingNote||'').trim()!=='')))) : mAddValid(rx))
+        const mValid  = r.type==='cut' ? (r.missingType && r.missingType!=='' && mTotCut(r)===mNeeded(r) && (r.missingType!=='known' || (r.missingBed&&r.missingBed!==''&&(r.missingBed!=='other'||(r.missingNote||'').trim()!=='')))) : (r.expM!==''&&r.expY!=='')
+        const allMValid = mRes.every(rx => rx.type==='cut' ? (rx.missingType && rx.missingType!=='' && mTotCut(rx)===mNeeded(rx) && (rx.missingType!=='known' || (rx.missingBed&&rx.missingBed!==''&&(rx.missingBed!=='other'||(rx.missingNote||'').trim()!=='')))) : (rx.expM!==''&&rx.expY!==''))
         const curYear = new Date().getFullYear()
         const months = ['01','02','03','04','05','06','07','08','09','10','11','12']
         const thM = ['Jan.','Feb.','Mar.','Apr.','May','Jun.','Jul.','Aug.','Sep.','Oct.','Nov.','Dec.']
         const years = Array.from({length:15},(_,i)=>curYear+i)
         const setMExpM = v => setLocDiscModal(prev => { const nr=[...prev.resolves]; nr[prev.rIdx]={...nr[prev.rIdx],expM:v}; return {...prev,resolves:nr} })
         const setMExpY = v => setLocDiscModal(prev => { const nr=[...prev.resolves]; nr[prev.rIdx]={...nr[prev.rIdx],expY:v}; return {...prev,resolves:nr} })
-        const addMExtraLot = () => setLocDiscModal(prev => {
-          const nr=[...prev.resolves]; const ri=prev.rIdx; const rx=nr[ri]; if (rx.type!=='add') return prev
-          const newId = rx.extraLots.length > 0 ? Math.max(...rx.extraLots.map(l=>l.id))+1 : 1
-          nr[ri]={...rx, extraLots:[...rx.extraLots,{id:newId,qty:1,expM:'',expY:''}]}
-          return {...prev,resolves:nr}
-        })
-        const removeMExtraLot = (lotId) => setLocDiscModal(prev => {
-          const nr=[...prev.resolves]; const ri=prev.rIdx; const rx=nr[ri]; if (rx.type!=='add'||rx.extraLots.length<=1) return prev
-          nr[ri]={...rx, extraLots:rx.extraLots.filter(l=>l.id!==lotId)}
-          return {...prev,resolves:nr}
-        })
-        const updateMExtraLot = (lotId, field, value) => setLocDiscModal(prev => {
-          const nr=[...prev.resolves]; const ri=prev.rIdx; const rx=nr[ri]; if (rx.type!=='add') return prev
-          nr[ri]={...rx, extraLots:rx.extraLots.map(l=>l.id===lotId?{...l,[field]:value}:l)}
-          return {...prev,resolves:nr}
-        })
         const setMLotCut = (docId, val) => setLocDiscModal(prev => {
           const nr=[...prev.resolves]; const ri=prev.rIdx; const lot=nr[ri].lots.find(x=>x.docId===docId)
           nr[ri]={...nr[ri],lotCuts:{...nr[ri].lotCuts,[docId]:Math.max(0,Math.min(lot?.qty||0,val))}}
@@ -4217,16 +4200,16 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
                           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
                             <div style={{fontSize:12,fontWeight:600,color:'#E65100'}}>Lot เกิน {idx + 1}</div>
                             {r.extraLots.length > 1 && (
-                              <button onClick={() => removeMExtraLot(lot.id)} style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:'#A32D2D'}}>✕</button>
+                              <button onClick={() => removeExtraLot(mIdx, lot.id)} style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:'#A32D2D'}}>✕</button>
                             )}
                           </div>
                           
                           <div style={{marginBottom:8}}>
                             <div className="lbl" style={{color:'#3C3489',marginBottom:4}}>จำนวน</div>
                             <div className="nc">
-                              <button onClick={() => updateMExtraLot(lot.id, 'qty', Math.max(1, lot.qty - 1))}>−</button>
+                              <button onClick={() => updateExtraLot(mIdx, lot.id, 'qty', Math.max(1, lot.qty - 1))}>−</button>
                               <span>{lot.qty}</span>
-                              <button onClick={() => updateMExtraLot(lot.id, 'qty', Math.min(maxQty, lot.qty + 1))} disabled={lot.qty >= maxQty}>+</button>
+                              <button onClick={() => updateExtraLot(mIdx, lot.id, 'qty', Math.min(maxQty, lot.qty + 1))} disabled={lot.qty >= maxQty}>+</button>
                             </div>
                             <div style={{fontSize:10,color:'#854F0B',marginTop:2}}>สูงสุด {maxQty} {r.drug.unit}</div>
                           </div>
@@ -4234,14 +4217,14 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
                           <div className="g2">
                             <div>
                               <div className="lbl" style={{color:'#3C3489'}}>เดือน EXP</div>
-                              <select className="inp" value={lot.expM} onChange={e => updateMExtraLot(lot.id, 'expM', e.target.value)}>
+                              <select className="inp" value={lot.expM} onChange={e => updateExtraLot(mIdx, lot.id, 'expM', e.target.value)}>
                                 <option value="">-- Month --</option>
                                 {months.map((m,i)=><option key={m} value={m}>{m} ({thM[i]})</option>)}
                               </select>
                             </div>
                             <div>
                               <div className="lbl" style={{color:'#3C3489'}}>EXP Year</div>
-                              <select className="inp" value={lot.expY} onChange={e => updateMExtraLot(lot.id, 'expY', e.target.value)}>
+                              <select className="inp" value={lot.expY} onChange={e => updateExtraLot(mIdx, lot.id, 'expY', e.target.value)}>
                                 <option value="">-- Year --</option>
                                 {years.map(y=><option key={y} value={y}>{y}</option>)}
                               </select>
@@ -4255,7 +4238,7 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
                       )
                     })}
                     
-                    <button onClick={() => addMExtraLot()} className="btn sm full" style={{marginBottom:12,borderColor:'#FFB74D',color:'#E65100'}} disabled={r.extraLots.reduce((s, l) => s + l.qty, 0) >= (r.counted - r.systemTotal)}>
+                    <button onClick={() => addExtraLot(mIdx)} className="btn sm full" style={{marginBottom:12,borderColor:'#FFB74D',color:'#E65100'}} disabled={r.extraLots.reduce((s, l) => s + l.qty, 0) >= (r.counted - r.systemTotal)}>
                       + เพิ่ม lot (ถ้า EXP ต่าง)
                     </button>
                     
