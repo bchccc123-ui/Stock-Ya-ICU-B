@@ -823,6 +823,7 @@ export default function App() {
   const [expirySnapshots, setExpirySnapshots] = useState([])
   const [pendingSyncs, setPendingSyncs] = useState([])
   const [nurses, setNurses] = useState([])
+  const [groups, setGroups] = useState(STORAGE_GROUPS)
   const [seeded, setSeeded] = useState(false)
   const [locationDirs, setLocationDirs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('termya_loc_dirs') || '{}') } catch { return {} }
@@ -860,6 +861,18 @@ export default function App() {
         }
       } catch (e) { console.error('Seed nurses error:', e) }
 
+      try {
+        // Seed storage_groups if empty
+        const gSnap = await getDocs(collection(db, 'storage_groups'))
+        if (gSnap.empty) {
+          const batch3 = writeBatch(db)
+          STORAGE_GROUPS.forEach(g => {
+            batch3.set(doc(db, 'storage_groups', g.id), g)
+          })
+          await batch3.commit()
+        }
+      } catch (e) { console.error('Seed storage_groups error:', e) }
+
       setSeeded(true)
     }
     init()
@@ -893,6 +906,16 @@ export default function App() {
     }))
     unsubs.push(onSnapshot(query(collection(db, 'pending_syncs'), orderBy('timestamp', 'desc')), s => {
       setPendingSyncs(s.docs.map(d => ({ docId: d.id, ...d.data() })))
+    }))
+    unsubs.push(onSnapshot(collection(db, 'storage_groups'), s => {
+      if (!s.empty) {
+        const gs = s.docs.map(d => ({ ...d.data(), docId: d.id }))
+          .sort((a, b) => (a.order || 0) - (b.order || 0))
+        setGroups(gs)
+        // sync back to STORAGE_GROUPS so all direct reads stay consistent
+        STORAGE_GROUPS.length = 0
+        gs.forEach(g => STORAGE_GROUPS.push(g))
+      }
     }))
     setLoading(false)
     return () => unsubs.forEach(u => u())
@@ -1156,6 +1179,7 @@ export default function App() {
             <Setting
               drugs={drugs} nurses={nurses} db={db}
               locationDirs={locationDirs} saveLocDir={saveLocDir}
+              groups={groups}
             />
           )}
         </div>
@@ -6243,15 +6267,15 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
 }
 
 /* ═══ SETTING ═══ */
-function Setting({ drugs, nurses, db, locationDirs, saveLocDir }) {
+function Setting({ drugs, nurses, db, locationDirs, saveLocDir, groups }) {
   const [editId, setEditId]     = useState(null)
   const [form, setForm]         = useState({ name:'', unit:'amp', par:1, min:1, groupId:'G1', highAlert:false, controlled:false, singleStock:false, alertDays:30, fullDateExp:false, shelfDirectionOverride:'inherit' })
   const [drugSearch, setDrugSearch] = useState('')
   const [newNurse, setNewNurse] = useState('')
   const [saving, setSaving]     = useState(false)
   const [ok, setOk]             = useState('')
-  // Location management
-  const [locations, setLocations]   = useState(STORAGE_GROUPS)
+  // Location management — ใช้ groups จาก Firestore (realtime)
+  const locations = groups || STORAGE_GROUPS
   const [newLocName, setNewLocName] = useState('')
   const [newLocIcon, setNewLocIcon] = useState('📦')
   const [settingTab, setSettingTab] = useState('drugs') // drugs | nurses | locations
@@ -6296,16 +6320,24 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir }) {
     const d = snap.docs.find(x => x.data().name === name)
     if (d) await deleteDoc(doc(db, 'nurses', d.id))
   }
-  // Location management (in-memory + STORAGE_GROUPS mutation for session)
-  const addLocation = () => {
+  // Location management — บันทึกลง Firestore
+  const addLocation = async () => {
     if (!newLocName.trim()) return
+    setSaving(true)
     const newId = `GX${Date.now()}`
     const colors = ['#0F6E56','#185FA5','#854F0B','#534AB7','#A32D2D','#5F5E5A']
     const color  = colors[locations.length % colors.length]
-    const newLoc = { id: newId, name: newLocName.trim(), icon: newLocIcon, color }
-    STORAGE_GROUPS.push(newLoc)
-    setLocations([...STORAGE_GROUPS])
-    setNewLocName(''); setOk('เพิ่ม Location สำเร็จ ✓ (ใช้ได้ใน session นี้)'); setTimeout(() => setOk(''), 3000)
+    const newLoc = { id: newId, name: newLocName.trim(), icon: newLocIcon, color, order: locations.length }
+    await setDoc(doc(db, 'storage_groups', newId), newLoc)
+    setNewLocName(''); setSaving(false)
+    setOk('เพิ่ม Location สำเร็จ ✓'); setTimeout(() => setOk(''), 2000)
+  }
+  const deleteLocation = async (locId) => {
+    const inUse = drugs.some(d => d.groupId === locId)
+    if (inUse) { alert('ไม่สามารถลบได้ — มียาที่ใช้ Location นี้อยู่'); return }
+    if (!window.confirm('ลบ Location นี้?')) return
+    await deleteDoc(doc(db, 'storage_groups', locId))
+    setOk('ลบ Location แล้ว'); setTimeout(() => setOk(''), 2000)
   }
 
   // Drug list filtered by search
@@ -6550,8 +6582,8 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir }) {
             <button className="btn primary full" onClick={addLocation} disabled={!newLocName.trim()}>+ เพิ่ม Location</button>
           </div>
           <div className="card">
-            <div className="slbl">Locations ทั้งหมด ({STORAGE_GROUPS.length})</div>
-            {STORAGE_GROUPS.map(g => {
+            <div className="slbl">Locations ทั้งหมด ({locations.length})</div>
+            {locations.map(g => {
               const dir = locationDirs[g.id] || g.shelfDirection || 'fb'
               const dirLabel = dir === 'fb' ? 'หน้า/หลัง' : dir === 'ltr' ? 'ซ้าย=ก่อน' : 'ขวา=ก่อน'
               return (
@@ -6561,7 +6593,7 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir }) {
                     <div style={{ fontSize:12, fontWeight:500 }}>{g.icon} {g.name}</div>
                     <div style={{ fontSize:10, color:'#8BA898' }}>{drugs.filter(d=>d.groupId===g.id).length} ยา · {dirLabel}</div>
                   </div>
-                  <div style={{ display:'flex', gap:3 }}>
+                  <div style={{ display:'flex', gap:3, alignItems:'center' }}>
                     {[['fb','หน้า/หลัง'],['ltr','ซ้าย=ก่อน'],['rtl','ขวา=ก่อน']].map(([v,lbl]) => (
                       <button key={v} onClick={() => saveLocDir(g.id, v)}
                         style={{ padding:'3px 7px', borderRadius:6, border:'0.5px solid', fontSize:10, cursor:'pointer', fontFamily:'inherit',
@@ -6571,8 +6603,13 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir }) {
                         {lbl}
                       </button>
                     ))}
+                    {g.id.startsWith('GX') && (
+                      <button onClick={() => deleteLocation(g.docId || g.id)}
+                        style={{ padding:'3px 7px', borderRadius:6, border:'0.5px solid #E8B4B4', background:'#FFF0F0', color:'#A32D2D', fontSize:10, cursor:'pointer', fontFamily:'inherit' }}>
+                        ✕ ลบ
+                      </button>
+                    )}
                   </div>
-                  {g.id.startsWith('GX') && <span style={{ fontSize:10, color:'#8BA898' }}>session only</span>}
                 </div>
               )
             })}
