@@ -1007,11 +1007,11 @@ export default function App() {
       const drug = drugs.find(d => String(d.id) === String(l.drugId))
       if (!drug) return false
       const dl = daysLeftFn(l.expiry)
-      return dl >= 0 && dl <= (drug.alertDays || 30)
+      return dl >= 0 && dl <= (drug.alertDays || 10)
     }).map(l => {
       const drug = drugs.find(d => String(d.id) === String(l.drugId))
       const dl = daysLeftFn(l.expiry)
-      return { drugName: drug?.name||'', expiry: l.expiry, daysLeft: dl, alertDays: drug?.alertDays||30, qty: l.qty, unit: drug?.unit||'', loaned: l.loaned||false }
+      return { drugName: drug?.name||'', expiry: l.expiry, daysLeft: dl, alertDays: drug?.alertDays||10, qty: l.qty, unit: drug?.unit||'', loaned: l.loaned||false }
     })
     const payload = {
       monthKey: prevYM,
@@ -1082,7 +1082,7 @@ export default function App() {
 
   const getAlerts = () => {
     const dl = drugsWithStock()
-    const drugAlertMap = dl.reduce((m, d) => { m[d.id] = d.alertDays || 30; return m }, {})
+    const drugAlertMap = dl.reduce((m, d) => { m[d.id] = d.alertDays || 10; return m }, {})
     return {
       low:          dl.filter(d => !d.singleStock && d.stock > 0 && d.stock <= d.min),
       out:          dl.filter(d => d.stock <= 0),
@@ -3939,22 +3939,34 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
               reconciliation_time_minutes: null
             })
           } else {
-            // Missing_Unknown or no type: cut selected lots + withdrawal
+            // ผู้ใช้เลือก "ไม่ทราบสาเหตุ" → ระบบแยกหลังบ้านตาม par
             ls.forEach(l => { const cut = r.lotCuts[l.docId] || 0; if (cut > 0) batch.update(doc(db,'lots',l.docId), { qty: l.qty - cut }) })
             if (r.missingType === 'unknown') {
-              const wRef = doc(collection(db,'withdrawals'))
-              batch.set(wRef, {
-                nurse, drugId: d.id, drugName: d.name, bed: '(Unknown — Stock Count)',
-                qty: systemTotal - cnt,
-                note: r.missingNote ? `(Stock Count — Missing Unknown: ${r.missingNote})` : '(Stock Count — Missing Unknown)',
-                returned: true, retExp: '', ts: Timestamp.now(),
-                usage_type: 'Missing_Unknown',
-                pending_sync_id: null,
-                reconciliation_time_minutes: null
-              })
-            } else {
-              // No missingType selected (shouldn't happen due to isValid, but fallback)
-              ls.forEach(l => { const cut = r.lotCuts[l.docId] || 0; if (cut > 0) batch.update(doc(db,'lots',l.docId), { qty: l.qty - cut }) })
+              const isOverstock = cnt >= (d.par || 0)  // นับได้ >= par → ไม่ใช่ยาหาย
+              if (isOverstock) {
+                // บันทึกเป็น stock adjustment (ยาเกิน stock ไม่ใช่ยาหาย)
+                const adjRef = doc(collection(db,'stock_adjustments'))
+                batch.set(adjRef, {
+                  nurse, drugId: d.id, drugName: d.name,
+                  qty: -(systemTotal - cnt),
+                  reason: 'Stock Count — ยาเกิน Stock (นับได้ ≥ Par)',
+                  counted: cnt, systemTotal, par: d.par || 0,
+                  ts: Timestamp.now(), source: 'stock_count_overstock',
+                  note: r.missingNote || ''
+                })
+              } else {
+                // นับได้ < par → บันทึกเป็น Missing_Unknown จริง
+                const wRef = doc(collection(db,'withdrawals'))
+                batch.set(wRef, {
+                  nurse, drugId: d.id, drugName: d.name, bed: '(Unknown — Stock Count)',
+                  qty: systemTotal - cnt,
+                  note: r.missingNote ? `(Stock Count — Missing Unknown: ${r.missingNote})` : '(Stock Count — Missing Unknown)',
+                  returned: true, retExp: '', ts: Timestamp.now(),
+                  usage_type: 'Missing_Unknown',
+                  pending_sync_id: null,
+                  reconciliation_time_minutes: null
+                })
+              }
             }
           }
         } else if (cnt > systemTotal && r && r.extraLots && r.extraLots.length > 0) {
@@ -4341,7 +4353,7 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
       ) : (
         /* Accordion per location */
         STORAGE_GROUPS.map(g => {
-          const gDrugs = drugs.filter(d => d.groupId === g.id)
+          const gDrugs = drugs.filter(d => d.groupId === g.id).sort((a,b)=>(a.order||0)-(b.order||0))
           if (!gDrugs.length) return null
           const isExpanded  = expandedGroup === g.id
           const isConfirmed = !!confirmedGroups[g.id]
@@ -4468,8 +4480,13 @@ function StockCount({ drugs, nurses, lots, lotsOf, db, fmtMY, daysLeft }) {
             } else if (rx.missingType==='unknown') {
               try {
                 rx.lots.forEach(async l=>{const cut=rx.lotCuts[l.docId]||0;if(cut>0)await updateDoc(doc(db,'lots',l.docId),{qty:l.qty-cut})})
-                await addDoc(collection(db,'withdrawals'),{nurse,drugId:rx.drug.id,drugName:rx.drug.name,bed:'(Unknown — Stock Count)',qty:rx.systemTotal-rx.counted,note:rx.missingNote?`(Stock Count — Missing Unknown: ${rx.missingNote})`:'(Stock Count — Missing Unknown)',returned:false,retExp:'',ts:Timestamp.now(),usage_type:'Missing_Unknown',pending_sync_id:null,reconciliation_time_minutes:null})
-              } catch(e){console.error('Missing_Unknown save error:',e)}
+                const isOverstock = rx.counted >= (rx.drug.par || 0)  // นับได้ >= par → ไม่ใช่ยาหาย
+                if (isOverstock) {
+                  await addDoc(collection(db,'stock_adjustments'),{nurse,drugId:rx.drug.id,drugName:rx.drug.name,qty:-(rx.systemTotal-rx.counted),reason:'Stock Count — ยาเกิน Stock (นับได้ ≥ Par)',counted:rx.counted,systemTotal:rx.systemTotal,par:rx.drug.par||0,ts:Timestamp.now(),source:'stock_count_overstock',note:rx.missingNote||''})
+                } else {
+                  await addDoc(collection(db,'withdrawals'),{nurse,drugId:rx.drug.id,drugName:rx.drug.name,bed:'(Unknown — Stock Count)',qty:rx.systemTotal-rx.counted,note:rx.missingNote?`(Stock Count — Missing Unknown: ${rx.missingNote})`:'(Stock Count — Missing Unknown)',returned:false,retExp:'',ts:Timestamp.now(),usage_type:'Missing_Unknown',pending_sync_id:null,reconciliation_time_minutes:null})
+                }
+              } catch(e){console.error('Missing_Unknown/Overstock save error:',e)}
             }
           }
           setLocResolves(prev => { const ids=mRes.map(rx=>rx.drug.id); return [...prev.filter(rx=>!ids.includes(rx.drug.id)),...mRes] })
@@ -5027,7 +5044,7 @@ function Expiry({ lots, drugs, daysLeft, fmtMY, db, removals, nurses, drugsWithS
   const q = search.toLowerCase()
   const allLots = lots
     .filter(l => l.qty > 0)
-    .map(l => { const d = drugs.find(x => x.id == l.drugId); return d ? { ...l, drugName: d.name, groupId: d.groupId, alertDays: d.alertDays || 30 } : null })
+    .map(l => { const d = drugs.find(x => x.id == l.drugId); return d ? { ...l, drugName: d.name, groupId: d.groupId, alertDays: d.alertDays || 10 } : null })
     .filter(Boolean)
     .filter(l => !q || l.drugName.toLowerCase().includes(q))
     .sort((a, b) => new Date(a.expiry) - new Date(b.expiry))
@@ -5060,7 +5077,7 @@ function Expiry({ lots, drugs, daysLeft, fmtMY, db, removals, nurses, drugsWithS
         expiry:        selLot.expiry,
         reason,                                          // expired | returned_to_pharmacy | damaged
         daysBeforeExp: dl,                               // ติดลบ = หมดแล้ว
-        wasInExchangeWindow: dl > 0 && dl <= (selLot.alertDays || 30), // อยู่ใน window แล้วยังไม่แลก
+        wasInExchangeWindow: dl > 0 && dl <= (selLot.alertDays || 10), // อยู่ใน window แล้วยังไม่แลก
         missedExchange: reason === 'expired' && dl <= 0, // หมดอายุโดยไม่ได้แลก
         isDataCorrection: reason === 'data_correction',
         nurse, note,
@@ -5743,7 +5760,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
       const fefoLots = lotsOf(d.id)
       const isFefo = fefoLots.length && fefoLots[0].docId === l.docId ? 'ใช่' : ''
       const dl2 = daysLeft(l.expiry)
-      const status = dl2 <= 0 ? 'หมดอายุ' : dl2 < 211 && dl2 > 0 ? 'เกินเวลาแลก' : dl2 >= 211 && dl2 <= 220 ? 'ถึงเวลาแลก' : dl2 <= (d.alertDays||30) ? 'ใกล้หมดอายุ' : 'ปกติ'
+      const status = dl2 <= 0 ? 'หมดอายุ' : dl2 < 211 && dl2 > 0 ? 'เกินเวลาแลก' : dl2 >= 211 && dl2 <= 220 ? 'ถึงเวลาแลก' : dl2 <= (d.alertDays||10) ? 'ใกล้หมดอายุ' : 'ปกติ'
       const loanedStr = l.loaned ? 'ใช่' : ''
       const tsStr = fmtDsafe(l.ts)
       csv += `"${d.name}","${fmtMY(l.expiry)}",${dl2},${l.qty},${d.unit},"${status}","${isFefo}","${loanedStr}","${tsStr}"\r\n`
@@ -5859,7 +5876,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
       const status = dLeft <= 0 ? 'หมดอายุ'
         : dLeft < 211 ? 'เกินเวลาแลก'
         : dLeft <= 220 ? 'ถึงเวลาแลก'
-        : dLeft <= (d.alertDays||30) ? 'ใกล้หมดอายุ'
+        : dLeft <= (d.alertDays||10) ? 'ใกล้หมดอายุ'
         : ''
       if (!status) return
       csv += `"${d.name}","${fmtMY(l.expiry)}",${dLeft},${l.qty},"${d.unit}","${status}"\r\n`
@@ -5966,11 +5983,11 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
         if (!l.qty || l.expiry === '2099-12-31') return false
         const d = dl.find(x => x.id == l.drugId); if (!d) return false
         const dd = daysLeft(l.expiry)
-        return dd >= 0 && dd <= (d.alertDays || 30)
+        return dd >= 0 && dd <= (d.alertDays || 10)
       }).sort((a,b) => new Date(a.expiry)-new Date(b.expiry)).forEach(l => {
         const d = dl.find(x => x.id == l.drugId); if (!d) return
         const dd = daysLeft(l.expiry)
-        csv += `"${d.name}","${fmtMY(l.expiry)}",${dd},${d.alertDays||30},${l.qty},"${l.loaned?'ใช่':''}"\r\n`
+        csv += `"${d.name}","${fmtMY(l.expiry)}",${dd},${d.alertDays||10},${l.qty},"${l.loaned?'ใช่':''}"\r\n`
       })
     }
     // ── ยาที่ตัดออก (กรองตามเดือน) ──
@@ -6682,7 +6699,7 @@ function Export({ drugsWithStock, lots, withdrawals, checks, daysLeft, fmtMY, ca
 /* ═══ SETTING ═══ */
 function Setting({ drugs, nurses, db, locationDirs, saveLocDir, groups }) {
   const [editId, setEditId]     = useState(null)
-  const [form, setForm]         = useState({ name:'', unit:'amp', par:1, min:1, groupId:'G1', highAlert:false, controlled:false, singleStock:false, alertDays:30, fullDateExp:false, shelfDirectionOverride:'inherit' })
+  const [form, setForm]         = useState({ name:'', unit:'amp', par:1, min:1, groupId:'G1', highAlert:false, controlled:false, singleStock:false, alertDays:10, fullDateExp:false, shelfDirectionOverride:'inherit' })
   const [drugSearch, setDrugSearch] = useState('')
   const [newNurse, setNewNurse] = useState('')
   const [saving, setSaving]     = useState(false)
@@ -6696,13 +6713,13 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir, groups }) {
   const [settingTab, setSettingTab] = useState('drugs') // drugs | nurses | locations
   const [qrDrug, setQrDrug] = useState(null)
 
-  const resetForm = () => setForm({ name:'', unit:'amp', par:1, min:1, groupId:'G1', highAlert:false, controlled:false, singleStock:false, alertDays:30, fullDateExp:false, shelfDirectionOverride:'inherit' })
+  const resetForm = () => setForm({ name:'', unit:'amp', par:1, min:1, groupId:'G1', highAlert:false, controlled:false, singleStock:false, alertDays:10, fullDateExp:false, shelfDirectionOverride:'inherit' })
 
   const openEdit = d => {
     setEditId(d.docId)
     setForm({ name:d.name, unit:d.unit, par:d.par, min:d.min, groupId:d.groupId,
       highAlert:d.highAlert, controlled:d.controlled, singleStock:d.singleStock||false,
-      alertDays:d.alertDays||30, fullDateExp:d.fullDateExp||false,
+      alertDays:d.alertDays||10, fullDateExp:d.fullDateExp||false,
       shelfDirectionOverride:d.shelfDirectionOverride||'inherit' })
     window.scrollTo(0,0)
   }
@@ -6713,7 +6730,9 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir, groups }) {
       setOk('แก้ไขสำเร็จ ✓')
     } else {
       const maxId = Math.max(0, ...drugs.map(d => d.id)) + 1
-      await setDoc(doc(db, 'drugs', String(maxId)), { id: maxId, ...form })
+      const drugsInGroup = drugs.filter(d => d.groupId === form.groupId)
+      const maxOrd = Math.max(0, ...drugsInGroup.map(d => d.order || 0)) + 1
+      await setDoc(doc(db, 'drugs', String(maxId)), { id: maxId, order: maxOrd, ...form })
       setOk('เพิ่มยาสำเร็จ ✓')
     }
     setEditId(null); resetForm(); setSaving(false); setTimeout(() => setOk(''), 2000)
@@ -6721,6 +6740,19 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir, groups }) {
   const deleteDrug = async (docId) => {
     if (!window.confirm('ลบยานี้?')) return
     await deleteDoc(doc(db, 'drugs', docId))
+  }
+  const moveDrug = async (drug, direction) => {
+    const grpDrugs = drugs.filter(d => d.groupId === drug.groupId).sort((a,b)=>(a.order||0)-(b.order||0))
+    const idx = grpDrugs.findIndex(d => d.docId === drug.docId)
+    const swapIdx = idx + direction
+    if (swapIdx < 0 || swapIdx >= grpDrugs.length) return
+    const other = grpDrugs[swapIdx]
+    const myOrd = drug.order ?? idx
+    const otherOrd = other.order ?? swapIdx
+    await Promise.all([
+      setDoc(doc(db,'drugs',drug.docId), {...drug, order: otherOrd}, {merge:true}),
+      setDoc(doc(db,'drugs',other.docId), {...other, order: myOrd}, {merge:true})
+    ])
   }
   const addNurse = async () => {
     if (!newNurse.trim()) return
@@ -6809,7 +6841,7 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir, groups }) {
               <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
                 <div className="lbl" style={{ color:'#3C3489', margin:0, width:180 }}>แจ้งเตือนก่อนหมดอายุ</div>
                 <input className="inp" type="number" min="1" max="400" value={form.alertDays}
-                  onChange={e => setForm(f => ({ ...f, alertDays: parseInt(e.target.value)||30 }))}
+                  onChange={e => setForm(f => ({ ...f, alertDays: parseInt(e.target.value)||10 }))}
                   style={{ maxWidth:80 }} />
                 <div style={{ fontSize:11, color:'#5F7A6A' }}>วัน</div>
               </div>
@@ -6910,7 +6942,7 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir, groups }) {
             ) : (
               /* Grouped by location */
               STORAGE_GROUPS.map(g => {
-                const gDrugs = drugs.filter(d => d.groupId === g.id)
+                const gDrugs = drugs.filter(d => d.groupId === g.id).sort((a,b)=>(a.order||0)-(b.order||0))
                 if (!gDrugs.length) return null
                 return (
                   <div key={g.id} style={{ marginBottom:12 }}>
@@ -6918,12 +6950,18 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir, groups }) {
                       <div style={{ width:8, height:8, borderRadius:2, background:g.color }}/>
                       <div style={{ fontSize:11, fontWeight:500, color:'#5F7A6A' }}>{g.icon} {g.name}</div>
                     </div>
-                    {gDrugs.map(d => (
+                    {gDrugs.map((d, di) => (
                       <div key={d.docId} className="row">
+                        <div style={{ display:'flex', flexDirection:'column', gap:2, marginRight:4 }}>
+                          <button onClick={() => moveDrug(d, -1)} disabled={di===0}
+                            style={{ background:'none', border:'0.5px solid #C8DDD4', borderRadius:4, padding:'2px 5px', cursor:'pointer', fontSize:10, lineHeight:1, opacity:di===0?0.3:1 }}>▲</button>
+                          <button onClick={() => moveDrug(d, 1)} disabled={di===gDrugs.length-1}
+                            style={{ background:'none', border:'0.5px solid #C8DDD4', borderRadius:4, padding:'2px 5px', cursor:'pointer', fontSize:10, lineHeight:1, opacity:di===gDrugs.length-1?0.3:1 }}>▼</button>
+                        </div>
                         <div style={{ flex:1, minWidth:0 }}>
                           <div style={{ fontSize:12, fontWeight:500 }}>{d.name}</div>
                           <div style={{ fontSize:10, color:'#8BA898' }}>
-                            par {d.par} · min {d.min} · {d.unit} · {d.alertDays||30} วัน
+                            par {d.par} · min {d.min} · {d.unit} · {d.alertDays||10} วัน
                             {d.singleStock?' · Single':''}{d.controlled?' · Ctrl':''}{d.fullDateExp?' · FullDate':''}
                           </div>
                         </div>
