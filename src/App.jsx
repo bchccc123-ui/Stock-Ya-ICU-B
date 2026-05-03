@@ -6710,6 +6710,8 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir, groups }) {
   const [newLocIcon, setNewLocIcon] = useState('📦')
   const [dragId,     setDragId]     = useState(null)
   const [dragOverId, setDragOverId] = useState(null)
+  const [drugDragId,     setDrugDragId]     = useState(null)
+  const [drugDragOverId, setDrugDragOverId] = useState(null)
   const [settingTab, setSettingTab] = useState('drugs') // drugs | nurses | locations
   const [qrDrug, setQrDrug] = useState(null)
 
@@ -6741,18 +6743,27 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir, groups }) {
     if (!window.confirm('ลบยานี้?')) return
     await deleteDoc(doc(db, 'drugs', docId))
   }
-  const moveDrug = async (drug, direction) => {
-    const grpDrugs = drugs.filter(d => d.groupId === drug.groupId).sort((a,b)=>(a.order||0)-(b.order||0))
-    const idx = grpDrugs.findIndex(d => d.docId === drug.docId)
-    const swapIdx = idx + direction
-    if (swapIdx < 0 || swapIdx >= grpDrugs.length) return
-    const other = grpDrugs[swapIdx]
-    const myOrd = drug.order ?? idx
-    const otherOrd = other.order ?? swapIdx
-    await Promise.all([
-      setDoc(doc(db,'drugs',drug.docId), {...drug, order: otherOrd}, {merge:true}),
-      setDoc(doc(db,'drugs',other.docId), {...other, order: myOrd}, {merge:true})
-    ])
+  const reorderDrugsByDrag = async (draggedDrug, targetDrug) => {
+    // จัดเรียงยาใหม่โดยใช้ drag & drop
+    if (draggedDrug.groupId !== targetDrug.groupId) return // ต้องอยู่ group เดียวกัน
+    
+    const grpDrugs = drugs.filter(d => d.groupId === draggedDrug.groupId).sort((a,b)=>(a.order||0)-(b.order||0))
+    const fromIdx = grpDrugs.findIndex(d => d.docId === draggedDrug.docId)
+    const toIdx = grpDrugs.findIndex(d => d.docId === targetDrug.docId)
+    
+    if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return
+    
+    // จัดเรียงใหม่
+    const reordered = [...grpDrugs]
+    const [moved] = reordered.splice(fromIdx, 1)
+    reordered.splice(toIdx, 0, moved)
+    
+    // บันทึก order ใหม่ลง Firestore
+    const batch = writeBatch(db)
+    reordered.forEach((drug, i) => {
+      batch.update(doc(db, 'drugs', drug.docId), { order: i })
+    })
+    await batch.commit()
   }
   const addNurse = async () => {
     if (!newNurse.trim()) return
@@ -6950,26 +6961,44 @@ function Setting({ drugs, nurses, db, locationDirs, saveLocDir, groups }) {
                       <div style={{ width:8, height:8, borderRadius:2, background:g.color }}/>
                       <div style={{ fontSize:11, fontWeight:500, color:'#5F7A6A' }}>{g.icon} {g.name}</div>
                     </div>
-                    {gDrugs.map((d, di) => (
-                      <div key={d.docId} className="row">
-                        <div style={{ display:'flex', flexDirection:'column', gap:2, marginRight:4 }}>
-                          <button onClick={() => moveDrug(d, -1)} disabled={di===0}
-                            style={{ background:'none', border:'0.5px solid #C8DDD4', borderRadius:4, padding:'2px 5px', cursor:'pointer', fontSize:10, lineHeight:1, opacity:di===0?0.3:1 }}>▲</button>
-                          <button onClick={() => moveDrug(d, 1)} disabled={di===gDrugs.length-1}
-                            style={{ background:'none', border:'0.5px solid #C8DDD4', borderRadius:4, padding:'2px 5px', cursor:'pointer', fontSize:10, lineHeight:1, opacity:di===gDrugs.length-1?0.3:1 }}>▼</button>
-                        </div>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <div style={{ fontSize:12, fontWeight:500 }}>{d.name}</div>
-                          <div style={{ fontSize:10, color:'#8BA898' }}>
-                            par {d.par} · min {d.min} · {d.unit} · {d.alertDays||10} วัน
-                            {d.singleStock?' · Single':''}{d.controlled?' · Ctrl':''}{d.fullDateExp?' · FullDate':''}
+                    {gDrugs.map((d, di) => {
+                      const isDragOver = drugDragOverId === d.docId
+                      return (
+                        <div key={d.docId} className="row"
+                          draggable={true}
+                          onDragStart={() => setDrugDragId(d.docId)}
+                          onDragOver={(e) => { e.preventDefault(); setDrugDragOverId(d.docId) }}
+                          onDragLeave={() => setDrugDragOverId(null)}
+                          onDrop={async (e) => {
+                            e.preventDefault(); setDrugDragOverId(null)
+                            if (!drugDragId || drugDragId === d.docId) { setDrugDragId(null); return }
+                            const draggedDrug = drugs.find(x => x.docId === drugDragId)
+                            await reorderDrugsByDrag(draggedDrug, d)
+                            setDrugDragId(null)
+                          }}
+                          style={{ 
+                            cursor: 'grab',
+                            background: isDragOver ? '#E1F5EE' : 'transparent',
+                            border: isDragOver ? '0.5px dashed #0F6E56' : '0.5px solid transparent',
+                            borderRadius: 8,
+                            padding: '8px 4px',
+                            marginBottom: 2,
+                            transition: 'background 0.15s'
+                          }}>
+                          <span style={{ color:'#B0C4B8', fontSize:14, cursor:'grab', marginRight:4 }}>☰</span>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ fontSize:12, fontWeight:500 }}>{d.name}</div>
+                            <div style={{ fontSize:10, color:'#8BA898' }}>
+                              par {d.par} · min {d.min} · {d.unit} · {d.alertDays||10} วัน
+                              {d.singleStock?' · Single':''}{d.controlled?' · Ctrl':''}{d.fullDateExp?' · FullDate':''}
+                            </div>
                           </div>
+                          <button onClick={() => setQrDrug(d)} style={{ background:'none', border:'0.5px solid #9FE1CB', color:'#0F6E56', borderRadius:6, padding:'4px 8px', cursor:'pointer', fontSize:12, marginRight:4 }}>📷</button>
+                          <button onClick={() => openEdit(d)} style={{ background:'none', border:'0.5px solid #C8DDD4', borderRadius:6, padding:'4px 8px', cursor:'pointer', fontSize:12, marginRight:4 }}>✏️</button>
+                          <button onClick={() => deleteDrug(d.docId)} style={{ background:'none', border:'0.5px solid #F7C1C1', color:'#A32D2D', borderRadius:6, padding:'4px 8px', cursor:'pointer', fontSize:12 }}>🗑</button>
                         </div>
-                        <button onClick={() => setQrDrug(d)} style={{ background:'none', border:'0.5px solid #9FE1CB', color:'#0F6E56', borderRadius:6, padding:'4px 8px', cursor:'pointer', fontSize:12, marginRight:4 }}>📷</button>
-                        <button onClick={() => openEdit(d)} style={{ background:'none', border:'0.5px solid #C8DDD4', borderRadius:6, padding:'4px 8px', cursor:'pointer', fontSize:12, marginRight:4 }}>✏️</button>
-                        <button onClick={() => deleteDrug(d.docId)} style={{ background:'none', border:'0.5px solid #F7C1C1', color:'#A32D2D', borderRadius:6, padding:'4px 8px', cursor:'pointer', fontSize:12 }}>🗑</button>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )
               })
